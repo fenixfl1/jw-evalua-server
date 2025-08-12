@@ -1,5 +1,5 @@
 import { User } from '@src/entity/User'
-import { BaseService } from './base.service'
+import { BaseService, CatchServiceError } from './base.service'
 import {
   AdvancedCondition,
   ApiResponse,
@@ -8,7 +8,7 @@ import {
 } from '@src/types/api.types'
 import { generatePassword } from '@src/helpers/generate-password'
 import * as bcrypt from 'bcrypt'
-import { DbConflictError } from '@src/errors/http.error'
+import { DbConflictError, NotFoundError } from '@src/errors/http.error'
 import { publishEmailToQueue } from './email/email-producer.service'
 import { UserRoles } from '@src/entity/RolesUser'
 import { EntityManager, Repository } from 'typeorm'
@@ -116,9 +116,6 @@ export class UserService extends BaseService {
 
     const userRole = await manager.save(data)
 
-    // eslint-disable-next-line no-console
-    console.log({ userRole })
-
     return userRole
   }
 
@@ -154,7 +151,6 @@ export class UserService extends BaseService {
         S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE"
       ) AS SUBQUERY
       ${whereClause}
-        
       `
 
     const [data = [], metadata] = await paginatedQuery({
@@ -168,5 +164,44 @@ export class UserService extends BaseService {
     }
 
     return this.success({ data, metadata })
+  }
+
+  @CatchServiceError()
+  async getUer(username: string): Promise<ApiResponse> {
+    const statement = `
+      SELECT 
+        *
+      FROM  (
+        SELECT 
+        U."USERNAME",
+        U."USER_ID",
+        U."IS_ACTIVE",
+        U."AVATAR",
+        U."STATE",
+        S."NAME",
+        S."LAST_NAME",
+        S."EMAIL",
+        S."PHONE",
+        STRING_AGG(R."NAME", ', ') AS "ROLES"
+      FROM  
+        public."USERS" AS U
+        LEFT JOIN public."STAFF" AS S ON S."STAFF_ID" = U."STAFF_ID"
+        LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID"
+        LEFT JOIN public."ROLE" AS R ON R."ROLE_ID" = RXU."ROLE_ID"
+      GROUP BY 
+        U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
+        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE"
+      ) AS SUBQUERY
+    WHERE
+      "USERNAME" = $1
+    `
+
+    const data = await queryRunner<User>(statement, [username])
+
+    if (!data?.length) {
+      throw new NotFoundError('Usuario no encontrado.')
+    }
+
+    return this.success({ data: data[0] })
   }
 }

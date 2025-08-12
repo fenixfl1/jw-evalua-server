@@ -1,6 +1,7 @@
 export const PATH_CREATE_STAFF = '/staff'
 export const PATH_GET_STAFF_PAGINATION = '/staff/pagination'
 export const PATH_USER = '/user'
+export const PATH_GET_USER = '/user/:username'
 export const PATH_GET_USER_PAGINAtION = '/user/pagination'
 export const PATH_LOGIN = '/login'
 export const PATH_CREATE_MENU_OPTION = '/menu_options'

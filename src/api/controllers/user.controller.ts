@@ -38,3 +38,18 @@ export const getUserPaginationController = async (
     next(error)
   }
 }
+
+export const getUerController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { username } = request.params
+    const result = await userService.getUer(username)
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
