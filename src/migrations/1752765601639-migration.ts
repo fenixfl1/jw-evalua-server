@@ -19,9 +19,9 @@ export class Migration1752765601639 implements MigrationInterface {
     // await queryRunner.query(`ALTER TABLE "MENU_OPTIONS_X_ROLES" ADD CONSTRAINT "PK_df5f8bfad59fbfa993b0a218293" PRIMARY KEY ("ID")`);
     // await queryRunner.query(`ALTER TABLE "MENU_OPTIONS_X_ROLES" DROP CONSTRAINT "PK_df5f8bfad59fbfa993b0a218293"`);
     // await queryRunner.query(`ALTER TABLE "MENU_OPTIONS_X_ROLES" ADD CONSTRAINT "PK_1f6674a97c67f5297c5d3b5997f" PRIMARY KEY ("MENU_OPTION_ID", "ROLE_ID")`);
-    await queryRunner.query(
-      `ALTER TABLE "USERS" DROP CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8"`
-    )
+    // await queryRunner.query(
+    //   `ALTER TABLE "USERS" DROP CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8"`
+    // )
     await queryRunner.query(
       `CREATE SEQUENCE IF NOT EXISTS "STAFF_STAFF_ID_seq" OWNED BY "STAFF"."STAFF_ID"`
     )
@@ -40,9 +40,9 @@ export class Migration1752765601639 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "USERS" ALTER COLUMN "LAST_LOGIN" SET NOT NULL`
     )
-    await queryRunner.query(
-      `ALTER TABLE "USERS" ALTER COLUMN "IS_ACTIVE" DROP DEFAULT`
-    )
+    // await queryRunner.query(
+    //   `ALTER TABLE "USERS" ALTER COLUMN "IS_ACTIVE" DROP DEFAULT`
+    // )
     await queryRunner.query(
       `ALTER TABLE "USERS" ALTER COLUMN "CREATED_BY" SET NOT NULL`
     )
@@ -58,9 +58,9 @@ export class Migration1752765601639 implements MigrationInterface {
     // await queryRunner.query(`ALTER TABLE "MENU_OPTIONS_X_ROLES" ADD CONSTRAINT "PK_b3d8c741a86cf2c57419df4ceba" PRIMARY KEY ("MENU_OPTION_ID", "ID", "ROLE_ID")`);
     // await queryRunner.query(`CREATE INDEX "IDX_d3bd9bead05f4d2521b2ffe1a8" ON "MENU_OPTIONS_X_ROLES" ("MENU_OPTION_ID") `);
     // await queryRunner.query(`CREATE INDEX "IDX_2c7ac3fef525331bd30141dafb" ON "MENU_OPTIONS_X_ROLES" ("ROLE_ID") `);
-    await queryRunner.query(
-      `ALTER TABLE "USERS" ADD CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8" FOREIGN KEY ("STAFF_ID") REFERENCES "STAFF"("STAFF_ID") ON DELETE NO ACTION ON UPDATE NO ACTION`
-    )
+    // await queryRunner.query(
+    //   `ALTER TABLE "USERS" ADD CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8" FOREIGN KEY ("STAFF_ID") REFERENCES "STAFF"("STAFF_ID") ON DELETE NO ACTION ON UPDATE NO ACTION`
+    // )
     await queryRunner.query(
       `ALTER TABLE "USERS" ADD CONSTRAINT "FK_f6c2423fd7a3b24eae6c372cc57" FOREIGN KEY ("CREATED_BY") REFERENCES "USERS"("USER_ID") ON DELETE NO ACTION ON UPDATE NO ACTION`
     )
@@ -76,9 +76,9 @@ export class Migration1752765601639 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "USERS" DROP CONSTRAINT "FK_f6c2423fd7a3b24eae6c372cc57"`
     )
-    await queryRunner.query(
-      `ALTER TABLE "USERS" DROP CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8"`
-    )
+    // await queryRunner.query(
+    //   `ALTER TABLE "USERS" DROP CONSTRAINT "FK_c477bdfa53cec3db27eb50458f8"`
+    // )
     await queryRunner.query(
       `DROP INDEX "public"."IDX_2c7ac3fef525331bd30141dafb"`
     )
