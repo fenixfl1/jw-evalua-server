@@ -4,12 +4,10 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
-  PrimaryColumn,
   PrimaryGeneratedColumn,
 } from 'typeorm'
-import { BaseEntity } from './BaseEntity'
 import { User } from './User'
-import { Department } from './Department'
+import { Module } from './Module'
 
 @Entity('STAFF')
 export class Staff {
@@ -54,9 +52,9 @@ export class Staff {
   STATE: string | null
 
   @Column({ type: 'number', nullable: true })
-  DEPARTMENT_ID: number
+  MODULE_ID: number
 
-  @ManyToOne(() => Department, { nullable: true })
-  @JoinColumn({ name: 'DEPARTMENT_ID' })
-  DEPARTMENT: Department
+  @ManyToOne(() => Module, { nullable: true })
+  @JoinColumn({ name: 'MODULE_ID' })
+  MODULE: Module
 }

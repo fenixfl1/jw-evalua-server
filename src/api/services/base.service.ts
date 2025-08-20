@@ -1,6 +1,7 @@
 import { INTERNAL_SERVER_ERROR } from '@src/constants/error-types'
 import {
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NO_CONTENT,
   HTTP_STATUS_OK,
 } from '@src/constants/status-codes'
 import { AppDataSource } from '@src/data-source'
@@ -45,6 +46,10 @@ export abstract class BaseService {
       data,
       metadata,
     }
+  }
+
+  protected noContent(): ApiResponse<any> {
+    return this.success({ status: HTTP_STATUS_NO_CONTENT })
   }
 
   protected fail(

@@ -12,7 +12,6 @@ import { MenuOption } from '@src/entity/MenuOption'
 import { User } from '@src/entity/User'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
 import { paginatedQuery } from '@src/helpers/query-utils'
-import { HTTP_STATUS_NO_CONTENT } from '@src/constants/status-codes'
 import { PermissionRole } from '@src/entity/PermissionRole'
 
 interface PermissionPayload {
@@ -144,7 +143,7 @@ export class RoleService extends BaseService {
     })
 
     if (!data.length) {
-      return this.success({ status: HTTP_STATUS_NO_CONTENT })
+      return this.noContent()
     }
 
     return this.success({ data, metadata })

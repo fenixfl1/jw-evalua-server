@@ -47,18 +47,30 @@ export class StaffService extends BaseService {
     payload: AdvancedCondition[],
     pagination: Pagination
   ): Promise<ApiResponse> {
-    const { qb, parameters } = queryBuilder(
-      this.staffRepository.createQueryBuilder('STAFF'),
-      payload,
-      'STAFF'
-    )
+    const { values, whereClause } = whereClauseBuilder(payload)
 
-    const params = []
-    Object.entries(parameters).forEach(([, value]) => {
-      params.push(value)
+    const statement = `
+      SELECT
+        *
+      FROM (
+        SELECT
+          s.*,
+          s."NAME" || ' ' || s."LAST_NAME" || ' ' || s."STAFF_ID" || s."IDENTITY_DOCUMENT" || ' ' || s."EMAIL" || ' ' || s."PHONE" "FILTER" 
+        FROM
+          public."STAFF" s
+      ) subquery
+      ${whereClause}
+    `
+
+    const [data = [], metadata] = await paginatedQuery<Staff>({
+      statement,
+      values,
+      pagination,
     })
 
-    const { data, metadata } = await paginate<Staff>(qb, pagination)
+    if (!data.length) {
+      return this.noContent()
+    }
 
     return this.success({ data, metadata })
   }

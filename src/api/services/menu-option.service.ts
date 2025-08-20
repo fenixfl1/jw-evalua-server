@@ -108,6 +108,9 @@ export class MenuOptionService extends BaseService {
 
     const menuOptions = await qb.getMany()
 
+    // eslint-disable-next-line no-console
+    console.log({ menuOptions, sql: qb.getSql() })
+
     const menuMap = new Map()
 
     menuOptions.forEach((menu) => {

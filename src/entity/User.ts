@@ -7,9 +7,11 @@ import {
   CreateDateColumn,
   JoinColumn,
   ManyToOne,
+  OneToMany,
 } from 'typeorm'
 import { Role } from './Role'
 import { Staff } from './Staff'
+import { Module } from './Module'
 
 @Entity('USERS')
 export class User {
@@ -26,7 +28,7 @@ export class User {
   @Column({ type: 'varchar', nullable: false, length: 25 })
   USERNAME: string
 
-  @Column({ type: 'varchar', nullable: false })
+  @Column({ type: 'varchar', nullable: false, select: false })
   PASSWORD: string
 
   @Column({ type: 'text', nullable: true })
@@ -61,4 +63,14 @@ export class User {
     inverseJoinColumn: { name: 'ROLE_ID', referencedColumnName: 'ROLE_ID' },
   })
   ROLES: Role[]
+
+  @OneToMany(() => Module, (m) => m.SUPERVISOR)
+  WORKTEAMS: Module[]
+
+  @Column({ type: 'integer', nullable: true })
+  MODULE_ID: number
+
+  @ManyToOne(() => Module, (m) => m.MEMBERS)
+  @JoinColumn({ name: 'MODULE_ID' })
+  MODULE: Module
 }

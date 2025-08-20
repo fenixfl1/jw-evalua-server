@@ -22,6 +22,37 @@ export const createUserController = async (
   }
 }
 
+export const updateUserController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const result = await userService.update(
+      request.body,
+      request['sessionInfo']
+    )
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const changeUserController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const result = await userService.changePassword(request.body)
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const getUserPaginationController = async (
   request: Request,
   res: Response,

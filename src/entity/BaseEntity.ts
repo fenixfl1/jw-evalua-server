@@ -12,13 +12,19 @@ export abstract class BaseEntity {
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   CREATED_AT: Date | null
 
-  @Column({ type: 'number', nullable: true })
+  @Column({ type: 'integer', nullable: true })
   CREATED_BY?: number
 
-  @ManyToOne(() => User, { nullable: true })
-  @JoinColumn({ name: 'CREATED_BY' })
-  CREATOR: User
-
   @Column({ type: 'char', length: 1, default: 'A' })
-  STATE: string | null
+  STATE: string
+
+  @UpdateDateColumn({
+    type: 'timestamp',
+    nullable: true,
+    default: () => 'CURRENT_TIMESTAMP',
+  })
+  UPDATED_AT: Date
+
+  @Column({ type: 'integer', nullable: true })
+  UPDATED_BY?: number
 }

@@ -4,12 +4,10 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
-  CreateDateColumn,
   OneToMany,
 } from 'typeorm'
 import { MenuOption } from './MenuOption'
 import { Action } from './Action'
-import { User } from './User'
 import { BaseEntity } from './BaseEntity'
 import { PermissionRole } from './PermissionRole'
 
@@ -18,7 +16,7 @@ export class Permission extends BaseEntity {
   @PrimaryGeneratedColumn()
   PERMISSION_ID: number
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', nullable: true })
   MENU_OPTION_ID: string
 
   @Column({ type: 'integer' })

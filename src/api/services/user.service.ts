@@ -8,20 +8,31 @@ import {
 } from '@src/types/api.types'
 import { generatePassword } from '@src/helpers/generate-password'
 import * as bcrypt from 'bcrypt'
-import { DbConflictError, NotFoundError } from '@src/errors/http.error'
+import {
+  DbConflictError,
+  NotFoundError,
+  UnAuthorizedError,
+} from '@src/errors/http.error'
 import { publishEmailToQueue } from './email/email-producer.service'
 import { UserRoles } from '@src/entity/RolesUser'
 import { EntityManager, Repository } from 'typeorm'
-import { Staff } from '@src/entity/Staff'
 import { Role } from '@src/entity/Role'
-import { queryBuilder } from '@src/helpers/query-builder'
-import { paginate, paginatedQuery, queryRunner } from '@src/helpers/query-utils'
+import { paginatedQuery, queryRunner } from '@src/helpers/query-utils'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
-import { HTTP_STATUS_NO_CONTENT } from '@src/constants/status-codes'
 
 interface CreateUserPayload extends User {
   STAFF_ID: number
   ROLE_ID: number
+}
+
+interface UpdateUserPayload extends User {
+  ROLE_ID: number
+}
+
+interface ChangePasswordPayload {
+  OLD_PASSWORD: string
+  NEW_PASSWORD: string
+  USERNAME: string
 }
 
 export class UserService extends BaseService {
@@ -52,8 +63,7 @@ export class UserService extends BaseService {
         )
       }
 
-      const password = PASSWORD ?? generatePassword()
-      const hashedPassword = await bcrypt.hash(password, 10)
+      const { password, hash } = await generatePassword(PASSWORD)
 
       const creator = await this.userRepository.findOneBy({
         USER_ID: session.userId,
@@ -65,7 +75,7 @@ export class UserService extends BaseService {
         CREATED_AT: new Date(),
         IS_ACTIVE: true,
         CREATOR: creator,
-        PASSWORD: hashedPassword,
+        PASSWORD: hash,
         USERNAME,
       })
 
@@ -73,7 +83,7 @@ export class UserService extends BaseService {
 
       if (ROLE_ID) {
         await this.createUserRole(
-          { USER: user, ROLE_ID, CREATOR: creator },
+          { USER: user, ROLE_ID, CREATED_BY: creator.USER_ID },
           manager
         )
       }
@@ -100,8 +110,73 @@ export class UserService extends BaseService {
     })
   }
 
+  @CatchServiceError()
+  async update(
+    payload: UpdateUserPayload,
+    session: SessionInfo
+  ): Promise<ApiResponse> {
+    const { USERNAME, USER_ID, ROLE_ID, ...restProps } = payload
+
+    return this.dataSource.transaction(async (manager) => {
+      const [user] = await this.userRepository.find({
+        relations: ['ROLES'],
+        where: { USERNAME, USER_ID },
+      })
+
+      await manager.update(User, { USERNAME, USER_ID }, { ...restProps })
+
+      const userRoles = await this.userRolesRepository.find({
+        where: {
+          USER_ID,
+        },
+      })
+
+      if (
+        ROLE_ID &&
+        !userRoles.some(
+          (rol) => rol.ROLE_ID === ROLE_ID && rol.USER_ID === USER_ID
+        )
+      ) {
+        await manager.update(UserRoles, { USER_ID }, { STATE: 'I' })
+
+        await manager.save(UserRoles, {
+          ROLE_ID,
+          USER: user,
+          CREATED_AT: new Date(),
+          CREATED_BY: session.userId,
+          STATE: 'A',
+        })
+      }
+
+      const { data } = await this.getUer(USERNAME)
+
+      return this.success({ data })
+    })
+  }
+
+  @CatchServiceError()
+  async changePassword(payload: ChangePasswordPayload): Promise<ApiResponse> {
+    const { USERNAME, OLD_PASSWORD, NEW_PASSWORD } = payload
+    const user = await this.userRepository.findOne({
+      where: { USERNAME },
+    })
+
+    if (!user) {
+      throw new NotFoundError('Usuario no encontrado.')
+    }
+
+    if (!(await bcrypt.compare(OLD_PASSWORD, user.PASSWORD))) {
+      throw new UnAuthorizedError('La contraseña actual no es correcta.')
+    }
+
+    const { hash } = await generatePassword(NEW_PASSWORD)
+    await this.userRepository.save({ ...user, PASSWORD: hash })
+
+    return this.success({ message: 'Contraseña actualizada con  éxito.' })
+  }
+
   async createUserRole(
-    payload: Pick<UserRoles, 'ROLE_ID' | 'CREATOR' | 'USER'>,
+    payload: Pick<UserRoles, 'ROLE_ID' | 'CREATED_BY' | 'USER'>,
     manager: EntityManager
   ): Promise<UserRoles> {
     const [role] = await this.roleRepository.find({
@@ -160,7 +235,7 @@ export class UserService extends BaseService {
     })
 
     if (!data.length) {
-      return this.success({ status: HTTP_STATUS_NO_CONTENT })
+      return this.noContent()
     }
 
     return this.success({ data, metadata })
