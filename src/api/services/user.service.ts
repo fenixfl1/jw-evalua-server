@@ -175,23 +175,31 @@ export class UserService extends BaseService {
     return this.success({ message: 'Contraseña actualizada con  éxito.' })
   }
 
+  @CatchServiceError()
   async createUserRole(
     payload: Pick<UserRoles, 'ROLE_ID' | 'CREATED_BY' | 'USER'>,
     manager: EntityManager
   ): Promise<UserRoles> {
-    const [role] = await this.roleRepository.find({
-      where: { ROLE_ID: payload.ROLE_ID },
-    })
+    try {
+      const [role] = await this.roleRepository.find({
+        where: { ROLE_ID: payload.ROLE_ID },
+      })
 
-    const data = this.userRolesRepository.create({
-      ROLE: role,
-      USER: payload.USER,
-      CREATED_AT: new Date(),
-    })
+      const data = this.userRolesRepository.create({
+        ROLE: role,
+        USER: payload.USER,
+        CREATED_BY: payload.CREATED_BY,
+        CREATED_AT: new Date(),
+      })
 
-    const userRole = await manager.save(data)
+      const userRole = await manager.save(UserRoles, data)
 
-    return userRole
+      return userRole
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log({ error })
+      throw error
+    }
   }
 
   async getPagination(

@@ -2,9 +2,10 @@ import * as bcrypt from 'bcrypt'
 import * as jwt from 'jsonwebtoken'
 import ms from 'ms'
 import { BadRequestError, UnAuthorizedError } from '@src/errors/http.error'
-import { BaseService } from './base.service'
+import { BaseService, CatchServiceError } from './base.service'
 import moment from 'moment'
 import { normalizeUnit } from '@src/helpers/normalize-unit'
+import { User } from '@src/entity/User'
 
 interface LoginPayload {
   username: string
@@ -13,10 +14,13 @@ interface LoginPayload {
 
 export class AuthService extends BaseService {
   async login({ username, password }: LoginPayload) {
-    const user = await this.userRepository.findOne({
-      where: { USERNAME: username },
-      relations: ['STAFF'],
-    })
+    const user = await this.userRepository
+      .createQueryBuilder('U')
+      .addSelect('U.PASSWORD')
+      .where('U.USERNAME = :username ', { username })
+      .leftJoinAndSelect('U.STAFF', 'STAFF')
+      .getOne()
+
     if (!user) {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
     }
@@ -46,6 +50,8 @@ export class AuthService extends BaseService {
       }
     )
 
+    await this.loginLog(user)
+
     return this.success({
       data: {
         username,
@@ -72,5 +78,13 @@ export class AuthService extends BaseService {
     )
 
     return expiration.toISOString()
+  }
+
+  @CatchServiceError()
+  private async loginLog(user: User): Promise<void> {
+    await this.userRepository.update(user, {
+      LOGIN_COUNT: user.LOGIN_COUNT + 1,
+      LAST_LOGIN: new Date(),
+    })
   }
 }

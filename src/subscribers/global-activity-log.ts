@@ -1,4 +1,5 @@
-import { ActivityLog } from '@src/entity/ActivityLog'
+import { asyncLocalStorage } from '../api/middlewares/storage.middleware'
+import { ActivityLog } from '../entity/ActivityLog'
 import {
   EventSubscriber,
   EntitySubscriberInterface,
@@ -15,14 +16,16 @@ export class GlobalActivitySubscriber implements EntitySubscriberInterface {
   async afterInsert(event: InsertEvent<any>) {
     if (event.metadata.name === 'ActivityLog') return // Evitar loop
 
-    const log = new ActivityLog()
-    log.USER_ID = this.getUserId(event)
-    log.ACTION = 'INSERT'
-    log.MODEL = event.metadata.name
-    log.OBJECT_ID = this.getEntityId(event)
-    log.CHANGES = event.entity
+    if (this.getUserId()) {
+      const log = new ActivityLog()
+      log.USER_ID = this.getUserId()
+      log.ACTION = 'INSERT'
+      log.MODEL = event.metadata.name
+      log.OBJECT_ID = this.getEntityId(event)
+      log.CHANGES = event.entity
 
-    await event.manager.getRepository(ActivityLog).save(log)
+      await event.manager.getRepository(ActivityLog).save(log)
+    }
   }
 
   /**
@@ -31,17 +34,19 @@ export class GlobalActivitySubscriber implements EntitySubscriberInterface {
   async afterUpdate(event: UpdateEvent<any>) {
     if (event.metadata.name === 'ActivityLog') return
 
-    const log = new ActivityLog()
-    log.USER_ID = this.getUserId(event)
-    log.ACTION = 'UPDATE'
-    log.MODEL = event.metadata.name
-    log.OBJECT_ID = this.getEntityId(event)
-    log.CHANGES = event.updatedColumns.reduce((changes, col) => {
-      changes[col.propertyName] = (event.entity as any)[col.propertyName]
-      return changes
-    }, {} as Record<string, any>)
+    if (this.getUserId()) {
+      const log = new ActivityLog()
+      log.USER_ID = this.getUserId()
+      log.ACTION = 'UPDATE'
+      log.MODEL = event.metadata.name
+      log.OBJECT_ID = this.getEntityId(event)
+      log.CHANGES = event.updatedColumns.reduce((changes, col) => {
+        changes[col.propertyName] = (event.entity as any)[col.propertyName]
+        return changes
+      }, {} as Record<string, any>)
 
-    await event.manager.getRepository(ActivityLog).save(log)
+      await event.manager.getRepository(ActivityLog).save(log)
+    }
   }
 
   /**
@@ -50,24 +55,26 @@ export class GlobalActivitySubscriber implements EntitySubscriberInterface {
   async afterRemove(event: RemoveEvent<any>) {
     if (event.metadata.name === 'ActivityLog') return
 
-    const log = new ActivityLog()
-    log.USER_ID = this.getUserId(event)
-    log.ACTION = 'DELETE'
-    log.MODEL = event.metadata.name
-    log.OBJECT_ID = this.getEntityId(event)
-    log.CHANGES = event.entity ?? null
+    if (this.getUserId()) {
+      const log = new ActivityLog()
+      log.USER_ID = this.getUserId()
+      log.ACTION = 'DELETE'
+      log.MODEL = event.metadata.name
+      log.OBJECT_ID = this.getEntityId(event)
+      log.CHANGES = event.entity ?? null
 
-    await event.manager.getRepository(ActivityLog).save(log)
+      await event.manager.getRepository(ActivityLog).save(log)
+    }
   }
 
   /**
    * Método auxiliar: obtener el ID del usuario actual.
    * Esto depende de cómo pases el usuario en el contexto de la request.
    */
-  private getUserId(
-    event: InsertEvent<any> | UpdateEvent<any> | RemoveEvent<any>
-  ): number {
-    return event.entity?.UPDATED_BY ?? event.entity?.CREATED_BY ?? null
+  private getUserId(): number {
+    const storage = asyncLocalStorage.getStore()
+
+    return storage?.userId
   }
 
   private getEntityId(event: any) {

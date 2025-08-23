@@ -10,7 +10,7 @@ import { Staff } from '@src/entity/Staff'
 import { User } from '@src/entity/User'
 import { BaseError } from '@src/errors/base.error'
 import { NotFoundError } from '@src/errors/http.error'
-import { parseOracleError } from '@src/errors/ParseOracleErrors'
+import { parsePostgresError } from '@src/errors/parse.error'
 import { ApiResponse, Metadata } from '@src/types/api.types'
 import { DataSource, FindOptionsWhere, Repository } from 'typeorm'
 
@@ -142,7 +142,7 @@ export function CatchServiceError() {
           this.fail(error.message, error.status, error.name)
         }
 
-        const oraError = parseOracleError(error)
+        const oraError = parsePostgresError(error)
         if (oraError) {
           this.fail(
             `${oraError.message}. ${oraError.code}`,
