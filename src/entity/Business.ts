@@ -1,4 +1,4 @@
-import { BaseEntity, Column, Entity, PrimaryColumn } from 'typeorm'
+import { Column, Entity, PrimaryColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm'
 
 @Entity('BUSINESS')
 export class Business {
@@ -8,8 +8,11 @@ export class Business {
   @Column({ type: 'varchar' })
   NAME: string
 
-  @Column({ type: 'bytea' })
-  LOGO: string
+  @Column({ type: 'bytea', nullable: true })
+  LOGO: string | null
+
+  @Column({ type: 'text', nullable: true })
+  LOGO_URL?: string
 
   @Column({ type: 'varchar' })
   RNC: string
@@ -22,4 +25,16 @@ export class Business {
 
   @Column({ type: 'char' })
   STATE: string
+
+  @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  CREATED_AT: Date | null
+
+  @Column({ type: 'integer', nullable: true })
+  CREATED_BY?: number
+
+  @UpdateDateColumn({ type: 'timestamp', nullable: true, default: () => 'CURRENT_TIMESTAMP' })
+  UPDATED_AT: Date | null
+
+  @Column({ type: 'integer', nullable: true })
+  UPDATED_BY?: number
 }

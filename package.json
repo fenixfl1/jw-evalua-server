@@ -17,9 +17,9 @@
     "typeorm": "typeorm-ts-node-commonjs",
     "migration": "npx typeorm-ts-node-commonjs migration:generate -d ./src/data-source.ts ./src/migrations/migration",
     "migration:create": "typeorm migration:create ./src/migrations/PostRefactoring",
-    "migration:run": "npx typeorm-ts-node-commonjs migration:run -d ./src/data-source.ts",
+    "migration:run": "npm run typeorm -- migration:run -d src/data-source.ts",
     "migration:fake": "npx typeorm-ts-node-commonjs migration:run -d ./src/data-source.ts --fake",
-    "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d ./src/data-source.ts"
+    "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts"
   },
   "author": "",
   "license": "ISC",

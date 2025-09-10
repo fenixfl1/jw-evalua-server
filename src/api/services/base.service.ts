@@ -87,7 +87,7 @@ export abstract class BaseService {
     const staff = await this.staffRepository.findOneBy({ STAFF_ID: userId })
 
     if (!staff) {
-      throw new NotFoundError(`Empleado no encontrado.`)
+      throw new NotFoundError(`Empleado con id "${userId}" no encontrado.`)
     }
 
     return staff
@@ -103,7 +103,7 @@ export abstract class BaseService {
     })
 
     if (!user) {
-      throw new NotFoundError('Usuario no encontrado.')
+      throw new NotFoundError(`Usuario "${username}" no encontrado.`)
     }
 
     return user
@@ -119,16 +119,15 @@ export abstract class BaseService {
  * If the error is an instance of `BaseError`, it will call `this.fail()` with
  * the specific error message, status code, and error name. Otherwise, it calls
  * `this.fail()` with a generic error message.
- *
+ * @returns A wrapped method with centralized error handling.
  * @example
  * ```typescript
- * @CatchServiceError()
+ * CatchServiceError()
  * async someServiceMethod() {
  *   // Your method logic
  * }
  * ```
  *
- * @returns A wrapped method with centralized error handling.
  */
 export function CatchServiceError() {
   return function (target: any, propertyKey: string, descriptor: any) {

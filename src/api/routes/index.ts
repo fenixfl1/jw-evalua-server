@@ -7,6 +7,7 @@ import menuOptionRouter from './menu-option.routes'
 import roleRouter from './role.routes'
 import permissionRouter from './permission.routes'
 import moduleRouter from './module.routes'
+import goalRouter from './goal.routes'
 
 const publicRoutes: Router[] = [authRouter]
 const privateRoutes: Router[] = [
@@ -16,6 +17,7 @@ const privateRoutes: Router[] = [
   roleRouter,
   permissionRouter,
   moduleRouter,
+  goalRouter,
 ]
 
 const publicRouter = Router()

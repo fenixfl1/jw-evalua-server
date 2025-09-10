@@ -8,6 +8,8 @@ import routes from './api/routes'
 import { errorHandler } from './api/middlewares/error.middleware'
 import { startConsumer } from './api/services/email/email-consumer.service'
 
+const start = performance.now()
+
 const corsOptions = {
   origin: '*',
   methods: 'GET,HEAD,PUT,PATCH,POST',
@@ -31,7 +33,7 @@ async function init() {
 
     app.listen(process.env.APP_PORT)
 
-    serverMessage()
+    serverMessage(`${(performance.now() - start).toFixed(2)} ms`)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error(' 💥 Something went wrong: ', error)

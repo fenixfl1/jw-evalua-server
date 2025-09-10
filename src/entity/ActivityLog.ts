@@ -5,10 +5,12 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm'
 import { User } from './User'
 
 @Entity('ACTIVITY_LOG')
+@Index('IDX_ACTIVITY_LOG_USER_CREATED_AT', ['USER_ID', 'CREATED_AT'])
 export class ActivityLog {
   @PrimaryGeneratedColumn()
   ID: number
@@ -34,4 +36,10 @@ export class ActivityLog {
 
   @CreateDateColumn({ default: () => 'CURRENT_TIMESTAMP', type: 'timestamp' })
   CREATED_AT: Date
+
+  @Column({ name: 'IP', type: 'inet', nullable: true })
+  IP?: string
+
+  @Column({ name: 'USER_AGENT', type: 'text', nullable: true })
+  USER_AGENT?: string
 }

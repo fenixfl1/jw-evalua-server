@@ -1,8 +1,11 @@
 import 'reflect-metadata'
 import { DataSource } from 'typeorm'
 import { config } from 'dotenv'
+import * as Subscribers from './subscribers'
 
-config({ debug: true })
+const subscribers = Object.values(Subscribers)
+
+config({ debug: false, quiet: true })
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -16,5 +19,5 @@ export const AppDataSource = new DataSource({
   logging: false,
   entities: ['src/entity/**/*.{ts,js}'],
   migrations: ['src/migrations/**/*.{ts,js}'],
-  subscribers: ['src/subscribers/**/*.{ts,js}'],
+  subscribers,
 })

@@ -8,12 +8,16 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  Index,
+  Unique,
 } from 'typeorm'
 import { Role } from './Role'
 import { Staff } from './Staff'
 import { Module } from './Module'
 
 @Entity('USERS')
+@Unique('UQ_USERS_USERNAME', ['USERNAME'])
+@Index('IDX_USERS_USERNAME', ['USERNAME'])
 export class User {
   @PrimaryGeneratedColumn()
   USER_ID: number
@@ -28,13 +32,13 @@ export class User {
   @Column({ type: 'varchar', nullable: false, length: 25 })
   USERNAME: string
 
-  @Column({ type: 'varchar', nullable: false, select: false })
-  PASSWORD: string
+  @Column({ name: 'PASSWORD_HASH', type: 'varchar', nullable: false, select: false })
+  PASSWORD_HASH: string
 
   @Column({ type: 'text', nullable: true })
   AVATAR: string
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'integer', nullable: true })
   LOGIN_COUNT: number
 
   @Column({ type: 'timestamp', nullable: true })

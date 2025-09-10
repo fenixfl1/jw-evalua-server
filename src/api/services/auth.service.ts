@@ -16,7 +16,7 @@ export class AuthService extends BaseService {
   async login({ username, password }: LoginPayload) {
     const user = await this.userRepository
       .createQueryBuilder('U')
-      .addSelect('U.PASSWORD')
+      .addSelect('U.PASSWORD_HASH')
       .where('U.USERNAME = :username ', { username })
       .leftJoinAndSelect('U.STAFF', 'STAFF')
       .getOne()
@@ -25,10 +25,7 @@ export class AuthService extends BaseService {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
     }
 
-    const isPasswordValid = await bcrypt.compare(
-      password,
-      user?.PASSWORD as string
-    )
+    const isPasswordValid = await bcrypt.compare(password, user?.PASSWORD_HASH as string)
     if (!isPasswordValid) {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
     }
@@ -82,8 +79,9 @@ export class AuthService extends BaseService {
 
   @CatchServiceError()
   private async loginLog(user: User): Promise<void> {
+    const current = typeof user.LOGIN_COUNT === 'number' ? user.LOGIN_COUNT : 0
     await this.userRepository.update(user, {
-      LOGIN_COUNT: user.LOGIN_COUNT + 1,
+      LOGIN_COUNT: current + 1,
       LAST_LOGIN: new Date(),
     })
   }

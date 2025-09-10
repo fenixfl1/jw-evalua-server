@@ -23,6 +23,7 @@ import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
 interface CreateUserPayload extends User {
   STAFF_ID: number
   ROLE_ID: number
+  PASSWORD?: string
 }
 
 interface UpdateUserPayload extends User {
@@ -48,7 +49,7 @@ export class UserService extends BaseService {
   async create(payload: CreateUserPayload, session: SessionInfo) {
     const {
       USERNAME,
-      PASSWORD = '1234',
+      PASSWORD: RAW_PASSWORD = '1234',
       STAFF_ID,
       ROLE_ID,
       ...userData
@@ -63,7 +64,7 @@ export class UserService extends BaseService {
         )
       }
 
-      const { password, hash } = await generatePassword(PASSWORD)
+      const { password, hash } = await generatePassword(RAW_PASSWORD)
 
       const creator = await this.userRepository.findOneBy({
         USER_ID: session.userId,
@@ -75,7 +76,7 @@ export class UserService extends BaseService {
         CREATED_AT: new Date(),
         IS_ACTIVE: true,
         CREATOR: creator,
-        PASSWORD: hash,
+        PASSWORD_HASH: hash,
         USERNAME,
       })
 
@@ -159,18 +160,23 @@ export class UserService extends BaseService {
     const { USERNAME, OLD_PASSWORD, NEW_PASSWORD } = payload
     const user = await this.userRepository.findOne({
       where: { USERNAME },
+      select: {
+        USER_ID: true,
+        USERNAME: true,
+        PASSWORD_HASH: true,
+      },
     })
 
     if (!user) {
       throw new NotFoundError('Usuario no encontrado.')
     }
 
-    if (!(await bcrypt.compare(OLD_PASSWORD, user.PASSWORD))) {
+    if (!(await bcrypt.compare(OLD_PASSWORD, user.PASSWORD_HASH))) {
       throw new UnAuthorizedError('La contraseña actual no es correcta.')
     }
 
     const { hash } = await generatePassword(NEW_PASSWORD)
-    await this.userRepository.save({ ...user, PASSWORD: hash })
+    await this.userRepository.save({ ...user, PASSWORD_HASH: hash })
 
     return this.success({ message: 'Contraseña actualizada con  éxito.' })
   }
@@ -196,8 +202,6 @@ export class UserService extends BaseService {
 
       return userRole
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.log({ error })
       throw error
     }
   }
