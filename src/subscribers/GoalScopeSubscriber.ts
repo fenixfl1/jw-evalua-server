@@ -7,7 +7,8 @@ import {
 } from 'typeorm'
 import { GoalStaff } from '../entity/GoalStaff'
 import { GoalModule } from '../entity/GoalModule'
-import { Goal, GoalScope } from '../entity/Goal'
+import { Goal } from '../entity/Goal'
+import { GoalScope } from '../entity/goal-scope.enum'
 
 @EventSubscriber()
 export class GoalScopeSubscriber implements EntitySubscriberInterface {

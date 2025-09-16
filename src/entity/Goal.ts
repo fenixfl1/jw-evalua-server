@@ -1,18 +1,14 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm'
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm'
 import { BaseEntity } from './BaseEntity'
-
-export enum GoalScope {
-  INDIVIDUAL = 'individual',
-  MODULE = 'module',
-}
+import { GoalStaff } from './GoalStaff'
+import { GoalModule } from './GoalModule'
+import { GoalProgress } from './GoalProgress'
+import { GoalScope } from './goal-scope.enum'
 
 @Entity('GOAL')
 export class Goal extends BaseEntity {
   @PrimaryGeneratedColumn()
   GOAL_ID: number
-
-  @Column({ type: 'integer' })
-  MODULE_ID: number
 
   @Column({ type: 'varchar' })
   DESCRIPTION: string
@@ -28,4 +24,13 @@ export class Goal extends BaseEntity {
 
   @Column({ name: 'SCOPE', type: 'enum', enum: GoalScope })
   SCOPE: GoalScope
+
+  @OneToMany(() => GoalStaff, (goalStaff) => goalStaff.GOAL)
+  STAFF: GoalStaff[]
+
+  @OneToMany(() => GoalModule, (goalModule) => goalModule.GOAL)
+  MODULES: GoalModule[]
+
+  @OneToMany(() => GoalProgress, (progress) => progress.GOAL)
+  PROGRESS: GoalProgress[]
 }

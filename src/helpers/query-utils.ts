@@ -50,7 +50,7 @@ export const to_date = (date: string): string => `CAST(${date} AS TIMESTAMP)`
  * // Returns: "UPPER(TRANSLATE(action, 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunAEIOUUN'))"
  */
 export const translate = (field: string): string => {
-  return `UPPER(unaccent(${field}))`
+  return `UPPER(unaccent(${field}::text))`
 }
 
 /**

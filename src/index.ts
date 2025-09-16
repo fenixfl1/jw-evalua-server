@@ -29,15 +29,12 @@ async function init() {
 
     await AppDataSource.initialize()
 
-    await startConsumer()
-
     app.listen(process.env.APP_PORT)
 
     serverMessage(`${(performance.now() - start).toFixed(2)} ms`)
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(' 💥 Something went wrong: ', error)
   }
 }
 
-init()
+init().then(async () => await startConsumer())

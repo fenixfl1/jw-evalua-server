@@ -11,7 +11,7 @@ export const createGoalSchema = Joi.object({
 
 export const assignGoalStaffSchema = Joi.object({
   GOAL_ID: Joi.number().integer().required(),
-  PERIOD_ID: Joi.number().integer().required(), // ISO week YYYYWW
+  PERIOD: Joi.number().integer().required(), // ISO week YYYYWW
   ASSIGNMENTS: Joi.array()
     .items(
       Joi.object({
@@ -27,14 +27,14 @@ export const assignGoalStaffSchema = Joi.object({
 export const assignGoalModuleSchema = Joi.object({
   GOAL_ID: Joi.number().integer().required(),
   MODULE_ID: Joi.number().integer().required(),
-  PERIOD_ID: Joi.number().integer().required(),
+  PERIOD: Joi.number().integer().required(),
   TARGET_VALUE: Joi.number().integer().min(0).required(),
 })
 
 export const postProgressSchema = Joi.object({
   GOAL_ID: Joi.number().integer().required(),
   SCOPE: Joi.string().valid('individual', 'module').required(),
-  PERIOD_ID: Joi.number().integer().required(),
+  PERIOD: Joi.number().integer().required(),
   ACTUAL_VALUE: Joi.number().integer().min(0).required(),
   STAFF_ID: Joi.number().integer().when('SCOPE', {
     is: 'individual',
@@ -47,4 +47,3 @@ export const postProgressSchema = Joi.object({
     otherwise: Joi.forbidden(),
   }),
 })
-

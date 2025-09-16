@@ -42,7 +42,7 @@ export class Staff {
   @Column({ type: 'varchar' })
   PHONE: string
 
-  @Column({ type: 'enum', enum: Gender })
+  @Column({ type: 'enum', enum: Gender, nullable: true })
   GENDER: Gender
 
   @Column({ type: 'varchar', length: 11 })
@@ -64,7 +64,11 @@ export class Staff {
   @Column({ type: 'char', length: 1, default: 'A' })
   STATE: string | null
 
-  @UpdateDateColumn({ type: 'timestamp', nullable: true, default: () => 'CURRENT_TIMESTAMP' })
+  @UpdateDateColumn({
+    type: 'timestamp',
+    nullable: true,
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   UPDATED_AT: Date | null
 
   @Column({ type: 'integer', nullable: true })

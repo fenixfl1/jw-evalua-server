@@ -37,7 +37,10 @@ export const assignGoalModuleController = async (
   next: NextFunction
 ) => {
   try {
-    const result = await goalService.assignToModule(req.body, req['sessionInfo'])
+    const result = await goalService.assignToModule(
+      req.body,
+      req['sessionInfo']
+    )
     return sendResponse(res, result)
   } catch (error) {
     next(error)
@@ -66,7 +69,7 @@ export const getGoalSummaryStaffController = async (
     const staffId = Number(req.params.staffId)
     const periodId = Number(req.params.periodId)
     const result = await goalService.getStaffSummary(
-      { STAFF_ID: staffId, PERIOD_ID: periodId },
+      { STAFF_ID: staffId, PERIOD: periodId },
       req['sessionInfo']
     )
     return sendResponse(res, result)
@@ -84,7 +87,7 @@ export const getGoalSummaryModuleController = async (
     const moduleId = Number(req.params.moduleId)
     const periodId = Number(req.params.periodId)
     const result = await goalService.getModuleSummary(
-      { MODULE_ID: moduleId, PERIOD_ID: periodId },
+      { MODULE_ID: moduleId, PERIOD: periodId },
       req['sessionInfo']
     )
     return sendResponse(res, result)
