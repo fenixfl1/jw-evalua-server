@@ -13,9 +13,10 @@ import {
   Unique,
 } from 'typeorm'
 import { Role } from './Role'
-import { BaseEntity } from './BaseEntity'
+
 import { User } from './User'
 import { Permission } from './Permission'
+
 @Entity('MENU_OPTION')
 @Index('IDX_MENU_OPTION_PARENT_ORDER', ['PARENT_ID', 'ORDER'])
 @Unique('UQ_MENU_OPTION_PARENT_ORDER', ['PARENT_ID', 'ORDER'])
@@ -79,11 +80,18 @@ export class MenuOption {
   @Column({ type: 'char', length: 1, default: 'A' })
   STATE: string | null
 
-  @UpdateDateColumn({ type: 'timestamp', nullable: true, default: () => 'CURRENT_TIMESTAMP' })
+  @UpdateDateColumn({
+    type: 'timestamp',
+    nullable: true,
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   UPDATED_AT: Date | null
 
   @Column({ type: 'integer', nullable: true })
   UPDATED_BY?: number
+
+  @Column({ type: 'text', nullable: true })
+  CONTENT: string
 
   @OneToMany(() => Permission, (permission) => permission.MENU_OPTION)
   PERMISSIONS: Permission[]
