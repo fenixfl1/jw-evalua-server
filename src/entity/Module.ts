@@ -9,6 +9,7 @@ import {
 import { BaseEntity } from './BaseEntity'
 import { User } from './User'
 import { Staff } from './Staff'
+import { Evaluation } from './Evaluation'
 
 @Entity('MODULE')
 export class Module extends BaseEntity {
@@ -27,4 +28,7 @@ export class Module extends BaseEntity {
 
   @OneToMany(() => Staff, (user) => user.MODULE)
   MEMBERS: Staff[]
+
+  @OneToMany(() => Evaluation, (evaluation) => evaluation.MODULE)
+  EVALUATIONS: Evaluation[]
 }

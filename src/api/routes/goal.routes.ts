@@ -9,6 +9,7 @@ import {
   PATH_GET_GOAL_SUMMARY_STAFF,
   PATH_POST_GOAL_PROGRESS,
   PATH_GET_GOALS_BY_MODULE,
+  PATH_GET_GOAL_PAGINATION,
 } from '@src/constants/routes'
 import {
   assignGoalModuleSchema,
@@ -26,6 +27,7 @@ import {
   getGoalSummaryStaffController,
   postGoalProgressController,
   getGoalsByModuleController,
+  getGoalsPaginationController,
 } from '../controllers/goal.controller'
 
 const goalRouter = Router()
@@ -61,6 +63,12 @@ goalRouter.post(
   PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION,
   validateSchema(advancedConditionSchema),
   getGoalSummaryModulePaginationController
+)
+
+goalRouter.post(
+  PATH_GET_GOAL_PAGINATION,
+  validateSchema(advancedConditionSchema),
+  getGoalsPaginationController
 )
 
 goalRouter.get(PATH_GET_GOALS_BY_MODULE, getGoalsByModuleController)

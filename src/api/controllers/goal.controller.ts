@@ -125,3 +125,19 @@ export const getGoalSummaryModulePaginationController = async (
     next(error)
   }
 }
+
+export const getGoalsPaginationController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await goalService.getGoalsPagination(
+      req.body,
+      extractPagination(req.query)
+    )
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}

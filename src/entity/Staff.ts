@@ -5,12 +5,14 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   Unique,
   Check,
 } from 'typeorm'
 import { User } from './User'
 import { Module } from './Module'
+import { Evaluation } from './Evaluation'
 
 export enum Gender {
   M = 'M',
@@ -80,4 +82,10 @@ export class Staff {
   @ManyToOne(() => Module, { nullable: true })
   @JoinColumn({ name: 'MODULE_ID' })
   MODULE: Module
+
+  @OneToMany(() => Evaluation, (evaluation) => evaluation.STAFF)
+  EVALUATIONS_RECEIVED: Evaluation[]
+
+  @OneToMany(() => Evaluation, (evaluation) => evaluation.EVALUATOR)
+  EVALUATIONS_GIVEN: Evaluation[]
 }

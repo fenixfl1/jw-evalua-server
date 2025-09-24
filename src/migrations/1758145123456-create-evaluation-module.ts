@@ -1,0 +1,126 @@
+import { MigrationInterface, QueryRunner } from 'typeorm'
+
+export class Migration1758145123456 implements MigrationInterface {
+  name = 'Migration1758145123456'
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      CREATE TABLE "COMPETENCY" (
+        "COMPETENCY_ID" SERIAL NOT NULL,
+        "NAME" character varying(150) NOT NULL,
+        "DESCRIPTION" text,
+        "WEIGHT" numeric,
+        "CREATED_AT" TIMESTAMP NOT NULL DEFAULT now(),
+        "CREATED_BY" integer,
+        "STATE" character(1) NOT NULL DEFAULT 'A',
+        "UPDATED_AT" TIMESTAMP DEFAULT now(),
+        "UPDATED_BY" integer,
+        CONSTRAINT "PK_COMPETENCY" PRIMARY KEY ("COMPETENCY_ID"),
+        CONSTRAINT "UQ_COMPETENCY_NAME" UNIQUE ("NAME")
+      )
+    `)
+    await queryRunner.query(`
+      CREATE TABLE "EVALUATION" (
+        "EVALUATION_ID" SERIAL NOT NULL,
+        "MODULE_ID" integer NOT NULL,
+        "STAFF_ID" integer NOT NULL,
+        "EVALUATOR_ID" integer,
+        "GOAL_ID" integer,
+        "GOAL_STAFF_ID" integer,
+        "PERIOD" integer NOT NULL,
+        "OVERALL_SCORE" numeric,
+        "COMMENTS" text,
+        "CREATED_AT" TIMESTAMP NOT NULL DEFAULT now(),
+        "CREATED_BY" integer,
+        "STATE" character(1) NOT NULL DEFAULT 'A',
+        "UPDATED_AT" TIMESTAMP DEFAULT now(),
+        "UPDATED_BY" integer,
+        CONSTRAINT "PK_EVALUATION" PRIMARY KEY ("EVALUATION_ID")
+      )
+    `)
+    await queryRunner.query(
+      `CREATE INDEX "IDX_EVALUATION_LOOKUP" ON "EVALUATION" ("MODULE_ID", "STAFF_ID", "PERIOD")`
+    )
+    await queryRunner.query(`
+      CREATE TABLE "EVALUATION_DETAIL" (
+        "EVALUATION_DETAIL_ID" SERIAL NOT NULL,
+        "EVALUATION_ID" integer NOT NULL,
+        "COMPETENCY_ID" integer NOT NULL,
+        "GOAL_ID" integer,
+        "WEIGHT" numeric,
+        "SCORE" numeric,
+        "COMMENT" text,
+        "CREATED_AT" TIMESTAMP NOT NULL DEFAULT now(),
+        "CREATED_BY" integer,
+        "STATE" character(1) NOT NULL DEFAULT 'A',
+        "UPDATED_AT" TIMESTAMP DEFAULT now(),
+        "UPDATED_BY" integer,
+        CONSTRAINT "PK_EVALUATION_DETAIL" PRIMARY KEY ("EVALUATION_DETAIL_ID"),
+        CONSTRAINT "UQ_EVALUATION_DETAIL_COMPETENCY" UNIQUE ("EVALUATION_ID", "COMPETENCY_ID")
+      )
+    `)
+    await queryRunner.query(
+      `CREATE INDEX "IDX_EVALUATION_DETAIL_EVAL" ON "EVALUATION_DETAIL" ("EVALUATION_ID")`
+    )
+    await queryRunner.query(
+      `CREATE INDEX "IDX_EVALUATION_DETAIL_COMP" ON "EVALUATION_DETAIL" ("COMPETENCY_ID")`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_MODULE_ID" FOREIGN KEY ("MODULE_ID") REFERENCES "MODULE"("MODULE_ID") ON DELETE NO ACTION ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_STAFF_ID" FOREIGN KEY ("STAFF_ID") REFERENCES "STAFF"("STAFF_ID") ON DELETE NO ACTION ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_EVALUATOR_ID" FOREIGN KEY ("EVALUATOR_ID") REFERENCES "STAFF"("STAFF_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_GOAL_ID" FOREIGN KEY ("GOAL_ID") REFERENCES "GOAL"("GOAL_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_GOAL_STAFF_ID" FOREIGN KEY ("GOAL_STAFF_ID") REFERENCES "GOAL_X_STAFF"("GOAL_STAFF_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "FK_EVALUATION_DETAIL_EVALUATION_ID" FOREIGN KEY ("EVALUATION_ID") REFERENCES "EVALUATION"("EVALUATION_ID") ON DELETE CASCADE ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "FK_EVALUATION_DETAIL_COMPETENCY_ID" FOREIGN KEY ("COMPETENCY_ID") REFERENCES "COMPETENCY"("COMPETENCY_ID") ON DELETE RESTRICT ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "FK_EVALUATION_DETAIL_GOAL_ID" FOREIGN KEY ("GOAL_ID") REFERENCES "GOAL"("GOAL_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT "FK_EVALUATION_DETAIL_GOAL_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT "FK_EVALUATION_DETAIL_COMPETENCY_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT "FK_EVALUATION_DETAIL_EVALUATION_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT "FK_EVALUATION_GOAL_STAFF_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT "FK_EVALUATION_GOAL_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT "FK_EVALUATION_EVALUATOR_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT "FK_EVALUATION_STAFF_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT "FK_EVALUATION_MODULE_ID"`
+    )
+    await queryRunner.query(`DROP INDEX "public"."IDX_EVALUATION_DETAIL_COMP"`)
+    await queryRunner.query(`DROP INDEX "public"."IDX_EVALUATION_DETAIL_EVAL"`)
+    await queryRunner.query(`DROP TABLE "EVALUATION_DETAIL"`)
+    await queryRunner.query(`DROP INDEX "public"."IDX_EVALUATION_LOOKUP"`)
+    await queryRunner.query(`DROP TABLE "EVALUATION"`)
+    await queryRunner.query(`DROP TABLE "COMPETENCY"`)
+  }
+}

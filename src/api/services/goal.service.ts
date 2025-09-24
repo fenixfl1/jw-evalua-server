@@ -21,7 +21,7 @@ interface CreateGoalPayload extends Goal {}
 
 interface AssignToStaffPayload {
   GOAL_ID: number
-  PERIOD: number // ISO week id (YYYYWW)
+  PERIOD: number
   ASSIGNMENTS: { STAFF_ID: number; TARGET_VALUE: number; WEIGHT?: number }[]
 }
 
@@ -353,7 +353,7 @@ export class GoalService extends BaseService {
     const { whereClause, values } = whereClauseBuilder(conditions)
 
     const statement = `
-      WITH GM AS (
+      WITH TARGET AS (
         SELECT
           "GOAL_ID",
           "MODULE_ID",
@@ -363,7 +363,7 @@ export class GoalService extends BaseService {
         WHERE "STATE" = 'A'
         GROUP BY "GOAL_ID", "MODULE_ID", "PERIOD"
       ),
-      GP AS (
+      PROGRESS AS (
         SELECT
           "GOAL_ID",
           "MODULE_ID",
@@ -374,23 +374,28 @@ export class GoalService extends BaseService {
         WHERE "SCOPE" = 'module' AND "STATE" = 'A'
         GROUP BY "GOAL_ID", "MODULE_ID", "PERIOD"
       ),
+      KEYS AS (
+        SELECT DISTINCT "GOAL_ID", "MODULE_ID", "PERIOD" FROM TARGET
+        UNION
+        SELECT DISTINCT "GOAL_ID", "MODULE_ID", "PERIOD" FROM PROGRESS
+      ),
       DATA AS (
         SELECT
-          COALESCE(gm."GOAL_ID", gp."GOAL_ID") AS "GOAL_ID",
-          COALESCE(gm."MODULE_ID", gp."MODULE_ID") AS "MODULE_ID",
-          COALESCE(gp."PERIOD", gm."PERIOD") AS "PERIOD",
-          gm."TARGET_VALUE",
-          gp."ACTUAL_VALUE",
-          gp."LAST_UPDATE"
-        FROM GM gm
-        FULL OUTER JOIN GP gp
-          ON gm."GOAL_ID" = gp."GOAL_ID"
-        AND gm."MODULE_ID" IS NOT DISTINCT FROM gp."MODULE_ID"
-        AND (
-          gm."PERIOD" IS NULL
-          OR gp."PERIOD" IS NULL
-          OR gm."PERIOD" = gp."PERIOD"
-        )
+          k."GOAL_ID",
+          k."MODULE_ID",
+          k."PERIOD",
+          t."TARGET_VALUE",
+          p."ACTUAL_VALUE",
+          p."LAST_UPDATE"
+        FROM KEYS k
+        LEFT JOIN TARGET t
+          ON t."GOAL_ID" = k."GOAL_ID"
+         AND t."MODULE_ID" IS NOT DISTINCT FROM k."MODULE_ID"
+         AND t."PERIOD" IS NOT DISTINCT FROM k."PERIOD"
+        LEFT JOIN PROGRESS p
+          ON p."GOAL_ID" = k."GOAL_ID"
+         AND p."MODULE_ID" IS NOT DISTINCT FROM k."MODULE_ID"
+         AND p."PERIOD" IS NOT DISTINCT FROM k."PERIOD"
       )
       SELECT
         *
@@ -406,11 +411,16 @@ export class GoalService extends BaseService {
           COALESCE(d."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
           CASE
             WHEN d."TARGET_VALUE" IS NULL THEN NULL
-            WHEN d."TARGET_VALUE" > 0 THEN ROUND(
-              LEAST(COALESCE(d."ACTUAL_VALUE", 0)::decimal / d."TARGET_VALUE", 1) * g."WEIGHT",
+            WHEN d."TARGET_VALUE" = 0 THEN 0
+            ELSE ROUND(
+              LEAST(
+                COALESCE(d."ACTUAL_VALUE", 0)::decimal
+                / NULLIF(d."TARGET_VALUE", 0)
+                * 100,
+                100
+              ),
               2
             )
-            ELSE 0
           END AS "COMPLIANCE",
           d."LAST_UPDATE" AS "UPDATED_AT",
           g."DESCRIPTION" || ' ' || g."GOAL_ID" AS "FILTER"
@@ -420,6 +430,47 @@ export class GoalService extends BaseService {
       ) AS SUBQUERY
       ${whereClause}
       ORDER BY "GOAL_ID" DESC, "MODULE_ID" DESC NULLS LAST, "PERIOD" DESC NULLS LAST
+    `
+
+    const [data = [], metadata] = await paginatedQuery({
+      statement,
+      values,
+      pagination,
+    })
+
+    if (!data.length) {
+      return this.noContent()
+    }
+
+    return this.success({ data, metadata })
+  }
+
+  @CatchServiceError()
+  public async getGoalsPagination(
+    payload: AdvancedCondition[],
+    pagination: Pagination
+  ): Promise<ApiResponse> {
+    const { whereClause, values } = whereClauseBuilder(payload)
+
+    const statement = `
+      SELECT
+        *
+      FROM 
+        (
+          SELECT 
+            g."GOAL_ID",
+            g."DESCRIPTION",
+            g."START_DATE",
+            g."END_DATE",
+            g."STATE",
+            g."WEIGHT",
+            g."SCOPE",
+            g."GOAL_ID" || ' ' || g."DESCRIPTION" || ' ' || g."SCOPE" AS "FILTER"
+          FROM 
+            public."GOAL" g
+        ) AS subquery
+      ${whereClause}
+      ORDER BY "GOAL_ID"
     `
 
     const [data = [], metadata] = await paginatedQuery({

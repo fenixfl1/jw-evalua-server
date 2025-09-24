@@ -17,10 +17,20 @@ export const PATH_GET_PAGINATED_MODULES = '/module/pagination'
 export const PATH_CREATE_OR_UPDATE_MODULE_MEMBERS = '/module/members'
 // Goals
 export const PATH_CREATE_GOAL = '/goal'
+export const PATH_GET_GOAL_PAGINATION = '/goal/pagination'
 export const PATH_ASSIGN_GOAL_STAFF = '/goal/assign/staff'
 export const PATH_ASSIGN_GOAL_MODULE = '/goal/assign/module'
 export const PATH_POST_GOAL_PROGRESS = '/goal/progress'
-export const PATH_GET_GOAL_SUMMARY_STAFF = '/goal/summary/staff/:staffId/:periodId'
-export const PATH_GET_GOAL_SUMMARY_MODULE = '/goal/summary/module/:moduleId/:periodId'
-export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION = '/goal/summary/module/pagination'
+export const PATH_GET_GOAL_SUMMARY_STAFF =
+  '/goal/summary/staff/:staffId/:periodId'
+export const PATH_GET_GOAL_SUMMARY_MODULE =
+  '/goal/summary/module/:moduleId/:periodId'
+export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION =
+  '/goal/summary/module/pagination'
 export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId'
+
+// Evaluations
+export const PATH_CREATE_EVALUATION = '/evaluation'
+export const PATH_UPDATE_EVALUATION = '/evaluation/:evaluationId'
+export const PATH_GET_EVALUATION = '/evaluation/:evaluationId'
+export const PATH_GET_EVALUATION_PAGINATION = '/evaluation/pagination'
