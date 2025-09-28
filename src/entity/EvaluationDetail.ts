@@ -9,7 +9,7 @@ import {
 import { BaseEntity } from './BaseEntity'
 import { Evaluation } from './Evaluation'
 import { Competency } from './Competency'
-import { Goal } from './Goal'
+import { GoalStaff } from './GoalStaff'
 
 const numericTransformer = {
   to: (value?: number | null) => value,
@@ -20,7 +20,11 @@ const numericTransformer = {
 }
 
 @Entity('EVALUATION_DETAIL')
-@Unique('UQ_EVALUATION_DETAIL_COMPETENCY', ['EVALUATION_ID', 'COMPETENCY_ID'])
+@Unique('UQ_EVALUATION_DETAIL_UNIQUE', [
+  'EVALUATION_ID',
+  'COMPETENCY_ID',
+  'GOAL_STAFF_ID',
+])
 export class EvaluationDetail extends BaseEntity {
   @PrimaryGeneratedColumn()
   EVALUATION_DETAIL_ID: number
@@ -44,11 +48,11 @@ export class EvaluationDetail extends BaseEntity {
   COMPETENCY: Competency
 
   @Column({ type: 'integer', nullable: true })
-  GOAL_ID: number | null
+  GOAL_STAFF_ID: number | null
 
-  @ManyToOne(() => Goal, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'GOAL_ID' })
-  GOAL: Goal | null
+  @ManyToOne(() => GoalStaff, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'GOAL_STAFF_ID' })
+  GOAL_ASSIGNMENT: GoalStaff | null
 
   @Column({ type: 'numeric', nullable: true, transformer: numericTransformer })
   WEIGHT?: number | null

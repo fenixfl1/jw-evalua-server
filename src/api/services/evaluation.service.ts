@@ -5,7 +5,6 @@ import { EvaluationDetail } from '@src/entity/EvaluationDetail'
 import { Competency } from '@src/entity/Competency'
 import { Module } from '@src/entity/Module'
 import { Staff } from '@src/entity/Staff'
-import { Goal } from '@src/entity/Goal'
 import { GoalStaff } from '@src/entity/GoalStaff'
 import {
   AdvancedCondition,
@@ -19,7 +18,7 @@ import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
 
 interface EvaluationDetailInput {
   COMPETENCY_ID: number
-  GOAL_ID?: number | null
+  GOAL_STAFF_ID?: number | null
   WEIGHT?: number | null
   SCORE?: number | null
   COMMENT?: string | null
@@ -34,8 +33,6 @@ interface CreateEvaluationPayload {
   MODULE_ID: number
   STAFF_ID: number
   EVALUATOR_ID?: number | null
-  GOAL_ID?: number | null
-  GOAL_STAFF_ID?: number | null
   PERIOD: number
   OVERALL_SCORE?: number | null
   COMMENTS?: string | null
@@ -46,13 +43,11 @@ interface UpdateEvaluationPayload {
   MODULE_ID?: number
   STAFF_ID?: number
   EVALUATOR_ID?: number | null
-  GOAL_ID?: number | null
-  GOAL_STAFF_ID?: number | null
   PERIOD?: number
   OVERALL_SCORE?: number | null
   COMMENTS?: string | null
   DETAILS?: UpdateEvaluationDetailInput[]
-  STATE?: string
+  STATE?: 'A' | 'I'
 }
 
 export class EvaluationService extends BaseService {
@@ -61,7 +56,6 @@ export class EvaluationService extends BaseService {
   private competencyRepository: Repository<Competency>
   private moduleRepository: Repository<Module>
   private staffRepositoryLocal: Repository<Staff>
-  private goalRepository: Repository<Goal>
   private goalStaffRepository: Repository<GoalStaff>
 
   constructor() {
@@ -72,7 +66,6 @@ export class EvaluationService extends BaseService {
     this.competencyRepository = this.dataSource.getRepository(Competency)
     this.moduleRepository = this.dataSource.getRepository(Module)
     this.staffRepositoryLocal = this.dataSource.getRepository(Staff)
-    this.goalRepository = this.dataSource.getRepository(Goal)
     this.goalStaffRepository = this.dataSource.getRepository(GoalStaff)
   }
 
@@ -81,61 +74,41 @@ export class EvaluationService extends BaseService {
     payload: CreateEvaluationPayload,
     session: SessionInfo
   ): Promise<ApiResponse> {
-    try {
-      const {
-        MODULE_ID,
-        STAFF_ID,
-        EVALUATOR_ID,
-        GOAL_ID,
-        GOAL_STAFF_ID,
-        PERIOD,
-        OVERALL_SCORE,
-        COMMENTS,
-        DETAILS,
-      } = payload
+    const { MODULE_ID, STAFF_ID, PERIOD, OVERALL_SCORE, COMMENTS, DETAILS } =
+      payload
 
-      await this.ensureModuleExists(MODULE_ID)
-      await this.ensureStaffExists(STAFF_ID)
+    const evaluator = await this.getUser(session.username)
 
-      if (EVALUATOR_ID) {
-        await this.ensureStaffExists(EVALUATOR_ID)
+    await this.ensureModuleExists(MODULE_ID)
+    const evaluatedStaff = await this.ensureStaffExists(STAFF_ID)
+
+    const competencyIds = [
+      ...new Set(DETAILS.map((detail) => detail.COMPETENCY_ID)),
+    ]
+    if (competencyIds.length) {
+      const competencies = await this.competencyRepository.find({
+        where: { COMPETENCY_ID: In(competencyIds) },
+      })
+      if (competencies.length !== competencyIds.length) {
+        throw new NotFoundError('Una o mas competencias no existen.')
       }
+    }
 
-      if (GOAL_ID) {
-        await this.ensureGoalExists(GOAL_ID)
-      }
+    await this.validateGoalAssignments({
+      details: DETAILS,
+      staffId: evaluatedStaff.STAFF_ID,
+      period: PERIOD,
+    })
 
-      if (GOAL_STAFF_ID) {
-        const goalStaff = await this.goalStaffRepository.findOne({
-          where: { GOAL_STAFF_ID },
-        })
-        if (!goalStaff) {
-          throw new NotFoundError(
-            'Asignación de meta a empleado no encontrada.'
-          )
-        }
-      }
-
-      const competencyIds = [
-        ...new Set(DETAILS.map((detail) => detail.COMPETENCY_ID)),
-      ]
-      // const competencies = await this.competencyRepository.find({
-      //   where: { COMPETENCY_ID: In(competencyIds) },
-      // })
-      // if (competencies.length !== competencyIds.length) {
-      //   throw new NotFoundError('Una o mas competencias no existen.')
-      // }
-
-      const evaluation = await this.dataSource.transaction(async (manager) => {
+    const savedEvaluation = await this.dataSource.transaction(
+      async (manager) => {
         const evaluationRepo = manager.getRepository(Evaluation)
         const detailRepo = manager.getRepository(EvaluationDetail)
 
         const entity = evaluationRepo.create({
           MODULE_ID,
           STAFF_ID,
-          EVALUATOR_ID: EVALUATOR_ID ?? null,
-          GOAL_ID: GOAL_ID ?? null,
-          GOAL_STAFF_ID: GOAL_STAFF_ID ?? null,
+          EVALUATOR_ID: evaluator.STAFF_ID,
           PERIOD,
           OVERALL_SCORE: OVERALL_SCORE ?? null,
           COMMENTS: COMMENTS ?? null,
@@ -143,38 +116,34 @@ export class EvaluationService extends BaseService {
           STATE: 'A',
         })
 
-        const savedEvaluation = await evaluationRepo.save(entity)
+        const evaluation = await evaluationRepo.save(entity)
 
-        const detailEntities = DETAILS.map((detail) =>
-          detailRepo.create({
-            ...detail,
-            GOAL_ID: detail.GOAL_ID ?? null,
-            WEIGHT: detail.WEIGHT ?? null,
-            SCORE: detail.SCORE ?? null,
-            COMMENT: detail.COMMENT ?? null,
-            EVALUATION_ID: savedEvaluation.EVALUATION_ID,
-            CREATED_BY: session.userId,
-            STATE: 'A',
-          })
-        )
+        if (DETAILS.length) {
+          const detailEntities = DETAILS.map((detail) =>
+            detailRepo.create({
+              ...detail,
+              GOAL_STAFF_ID: detail.GOAL_STAFF_ID ?? null,
+              WEIGHT: detail.WEIGHT ?? null,
+              SCORE: detail.SCORE ?? null,
+              COMMENT: detail.COMMENT ?? null,
+              EVALUATION_ID: evaluation.EVALUATION_ID,
+              CREATED_BY: session.userId,
+              STATE: 'A',
+            })
+          )
 
-        if (detailEntities.length) {
           await detailRepo.save(detailEntities)
         }
 
-        return savedEvaluation
-      })
+        return evaluation
+      }
+    )
 
-      const data = await this.getEvaluationById(evaluation.EVALUATION_ID)
-      return this.success({
-        message: 'Evaluación creada con exito.',
-        data,
-      })
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.log({ error })
-      throw error
-    }
+    const data = await this.getEvaluationById(savedEvaluation.EVALUATION_ID)
+    return this.success({
+      message: 'Evaluación creada con éxito.',
+      data,
+    })
   }
 
   @CatchServiceError()
@@ -188,7 +157,7 @@ export class EvaluationService extends BaseService {
     })
 
     if (!evaluation) {
-      throw new NotFoundError('Evaluacion no encontrada.')
+      throw new NotFoundError('Evaluación no encontrada.')
     }
 
     if (payload.MODULE_ID) {
@@ -203,24 +172,13 @@ export class EvaluationService extends BaseService {
       await this.ensureStaffExists(payload.EVALUATOR_ID)
     }
 
-    if (payload.GOAL_ID) {
-      await this.ensureGoalExists(payload.GOAL_ID)
-    }
-
-    if (payload.GOAL_STAFF_ID) {
-      const goalStaff = await this.goalStaffRepository.findOne({
-        where: { GOAL_STAFF_ID: payload.GOAL_STAFF_ID },
-      })
-      if (!goalStaff) {
-        throw new NotFoundError('Asignacion de meta a empleado no encontrada.')
-      }
-    }
-
     const { DETAILS: detailsPayload = [], ...evaluationData } = payload
+
     if (detailsPayload.length) {
       const competencyIds = [
         ...new Set(detailsPayload.map((detail) => detail.COMPETENCY_ID)),
       ].filter((id): id is number => typeof id === 'number')
+
       if (competencyIds.length) {
         const competencies = await this.competencyRepository.find({
           where: { COMPETENCY_ID: In(competencyIds) },
@@ -229,6 +187,15 @@ export class EvaluationService extends BaseService {
           throw new NotFoundError('Una o mas competencias no existen.')
         }
       }
+
+      const targetPeriod = evaluationData.PERIOD ?? evaluation.PERIOD
+      const targetStaffId = evaluationData.STAFF_ID ?? evaluation.STAFF_ID
+
+      await this.validateGoalAssignments({
+        details: detailsPayload,
+        staffId: targetStaffId,
+        period: targetPeriod,
+      })
     }
 
     await this.dataSource.transaction(async (manager) => {
@@ -246,12 +213,6 @@ export class EvaluationService extends BaseService {
       if (evaluationData.EVALUATOR_ID !== undefined) {
         updatePayload.EVALUATOR_ID = evaluationData.EVALUATOR_ID
       }
-      if (evaluationData.GOAL_ID !== undefined) {
-        updatePayload.GOAL_ID = evaluationData.GOAL_ID
-      }
-      if (evaluationData.GOAL_STAFF_ID !== undefined) {
-        updatePayload.GOAL_STAFF_ID = evaluationData.GOAL_STAFF_ID
-      }
       if (evaluationData.PERIOD !== undefined) {
         updatePayload.PERIOD = evaluationData.PERIOD
       }
@@ -262,7 +223,7 @@ export class EvaluationService extends BaseService {
         updatePayload.COMMENTS = evaluationData.COMMENTS
       }
       if (evaluationData.STATE !== undefined) {
-        updatePayload.STATE = evaluationData.STATE as 'A' | 'I'
+        updatePayload.STATE = evaluationData.STATE
       }
 
       evaluationRepo.merge(evaluation, updatePayload)
@@ -291,7 +252,7 @@ export class EvaluationService extends BaseService {
           const entity = detailRepo.create({
             EVALUATION_ID: evaluationId,
             COMPETENCY_ID: detail.COMPETENCY_ID,
-            GOAL_ID: detail.GOAL_ID ?? null,
+            GOAL_STAFF_ID: detail.GOAL_STAFF_ID ?? null,
             WEIGHT: detail.WEIGHT ?? null,
             SCORE: detail.SCORE ?? null,
             COMMENT: detail.COMMENT ?? null,
@@ -322,7 +283,7 @@ export class EvaluationService extends BaseService {
 
         detailRepo.merge(existing, {
           COMPETENCY_ID: detail.COMPETENCY_ID ?? existing.COMPETENCY_ID,
-          GOAL_ID: detail.GOAL_ID ?? null,
+          GOAL_STAFF_ID: detail.GOAL_STAFF_ID ?? null,
           WEIGHT: detail.WEIGHT ?? null,
           SCORE: detail.SCORE ?? null,
           COMMENT: detail.COMMENT ?? null,
@@ -335,7 +296,7 @@ export class EvaluationService extends BaseService {
 
     const data = await this.getEvaluationById(evaluationId)
     return this.success({
-      message: 'Evaluacion actualizada con exito.',
+      message: 'Evaluación actualizada con exito.',
       data,
     })
   }
@@ -370,9 +331,6 @@ export class EvaluationService extends BaseService {
           staff."NAME" || ' ' || staff."LAST_NAME" AS "STAFF_NAME",
           e."EVALUATOR_ID",
           evaluator."NAME" || ' ' || evaluator."LAST_NAME" AS "EVALUATOR_NAME",
-          e."GOAL_ID",
-          g."DESCRIPTION" AS "GOAL_DESCRIPTION",
-          e."GOAL_STAFF_ID",
           e."PERIOD",
           e."OVERALL_SCORE",
           e."COMMENTS",
@@ -385,7 +343,6 @@ export class EvaluationService extends BaseService {
         LEFT JOIN public."MODULE" m ON m."MODULE_ID" = e."MODULE_ID"
         LEFT JOIN public."STAFF" staff ON staff."STAFF_ID" = e."STAFF_ID"
         LEFT JOIN public."STAFF" evaluator ON evaluator."STAFF_ID" = e."EVALUATOR_ID"
-        LEFT JOIN public."GOAL" g ON g."GOAL_ID" = e."GOAL_ID"
       ) AS subquery
       ${whereClause}
       ORDER BY "EVALUATION_ID" DESC
@@ -413,9 +370,11 @@ export class EvaluationService extends BaseService {
         MODULE: true,
         STAFF: true,
         EVALUATOR: true,
-        GOAL: true,
         DETAILS: {
           COMPETENCY: true,
+          GOAL_ASSIGNMENT: {
+            GOAL: true,
+          },
         },
       },
       order: {
@@ -445,12 +404,46 @@ export class EvaluationService extends BaseService {
     return staff
   }
 
-  private async ensureGoalExists(goalId: number): Promise<void> {
-    const goal = await this.goalRepository.findOne({
-      where: { GOAL_ID: goalId },
-    })
-    if (!goal) {
-      throw new NotFoundError('Meta no encontrada.')
+  private async validateGoalAssignments({
+    details,
+    staffId,
+    period,
+  }: {
+    details: EvaluationDetailInput[]
+    staffId: number
+    period: number
+  }): Promise<void> {
+    const goalStaffIds = details
+      .map((detail) => detail.GOAL_STAFF_ID)
+      .filter((value): value is number => value !== null && value !== undefined)
+
+    if (!goalStaffIds.length) {
+      return
     }
+
+    const assignments = await this.goalStaffRepository.find({
+      where: { GOAL_STAFF_ID: In(goalStaffIds) },
+      relations: {
+        STAFF: true,
+      },
+    })
+
+    if (assignments.length !== goalStaffIds.length) {
+      throw new NotFoundError('Una o mas asignaciones de metas no existen.')
+    }
+
+    assignments.forEach((assignment) => {
+      if (assignment.STAFF_ID !== staffId) {
+        throw new NotFoundError(
+          `La asignacion ${assignment.GOAL_STAFF_ID} no pertenece al colaborador evaluado.`
+        )
+      }
+
+      if (assignment.PERIOD !== period) {
+        throw new NotFoundError(
+          `La asignacion ${assignment.GOAL_STAFF_ID} no corresponde al periodo evaluado.`
+        )
+      }
+    })
   }
 }

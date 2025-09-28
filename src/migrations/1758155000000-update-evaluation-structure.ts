@@ -1,0 +1,74 @@
+import { MigrationInterface, QueryRunner } from 'typeorm'
+
+export class Migration1758155000000 implements MigrationInterface {
+  name = 'Migration1758155000000'
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT IF EXISTS "FK_EVALUATION_GOAL_STAFF_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP CONSTRAINT IF EXISTS "FK_EVALUATION_GOAL_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT IF EXISTS "FK_EVALUATION_DETAIL_GOAL_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT IF EXISTS "UQ_EVALUATION_DETAIL_COMPETENCY"`
+    )
+
+    await queryRunner.query(`ALTER TABLE "EVALUATION" DROP COLUMN IF EXISTS "GOAL_ID"`)
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" DROP COLUMN IF EXISTS "GOAL_STAFF_ID"`
+    )
+
+    await queryRunner.query(`ALTER TABLE "EVALUATION_DETAIL" DROP COLUMN IF EXISTS "GOAL_ID"`)
+
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD "GOAL_STAFF_ID" integer`
+    )
+
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "FK_EVALUATION_DETAIL_GOAL_STAFF_ID" FOREIGN KEY ("GOAL_STAFF_ID") REFERENCES "GOAL_X_STAFF"("GOAL_STAFF_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "UQ_EVALUATION_DETAIL_UNIQUE" UNIQUE ("EVALUATION_ID", "COMPETENCY_ID", "GOAL_STAFF_ID")`
+    )
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT IF EXISTS "UQ_EVALUATION_DETAIL_UNIQUE"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP CONSTRAINT IF EXISTS "FK_EVALUATION_DETAIL_GOAL_STAFF_ID"`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" DROP COLUMN IF EXISTS "GOAL_STAFF_ID"`
+    )
+
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD "GOAL_ID" integer`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "FK_EVALUATION_DETAIL_GOAL_ID" FOREIGN KEY ("GOAL_ID") REFERENCES "GOAL"("GOAL_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION_DETAIL" ADD CONSTRAINT "UQ_EVALUATION_DETAIL_COMPETENCY" UNIQUE ("EVALUATION_ID", "COMPETENCY_ID")`
+    )
+
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD "GOAL_STAFF_ID" integer`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD "GOAL_ID" integer`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_GOAL_ID" FOREIGN KEY ("GOAL_ID") REFERENCES "GOAL"("GOAL_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+    await queryRunner.query(
+      `ALTER TABLE "EVALUATION" ADD CONSTRAINT "FK_EVALUATION_GOAL_STAFF_ID" FOREIGN KEY ("GOAL_STAFF_ID") REFERENCES "GOAL_X_STAFF"("GOAL_STAFF_ID") ON DELETE SET NULL ON UPDATE NO ACTION`
+    )
+  }
+}

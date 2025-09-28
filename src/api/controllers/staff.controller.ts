@@ -22,6 +22,38 @@ export const createStaffController = async (
   }
 }
 
+export const updateStaffController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const result = await staffService.update(
+      request.body,
+      request['sessionInfo']
+    )
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getOneStaffController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { staffId } = request.params
+    const result = await staffService.getOneStaff(Number(staffId))
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const getPaginationController = async (
   request: Request,
   res: Response,

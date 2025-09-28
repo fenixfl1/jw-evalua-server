@@ -4,7 +4,6 @@ import { GoalStaff } from './GoalStaff'
 import { GoalModule } from './GoalModule'
 import { GoalProgress } from './GoalProgress'
 import { GoalScope } from './goal-scope.enum'
-import { Evaluation } from './Evaluation'
 
 @Entity('GOAL')
 export class Goal extends BaseEntity {
@@ -34,7 +33,4 @@ export class Goal extends BaseEntity {
 
   @OneToMany(() => GoalProgress, (progress) => progress.GOAL)
   PROGRESS: GoalProgress[]
-
-  @OneToMany(() => Evaluation, (evaluation) => evaluation.GOAL)
-  EVALUATIONS: Evaluation[]
 }

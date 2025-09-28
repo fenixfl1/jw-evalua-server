@@ -1,5 +1,6 @@
 export const PATH_CREATE_STAFF = '/staff'
 export const PATH_GET_STAFF_PAGINATION = '/staff/pagination'
+export const PATH_GET_ONE_STAFF = '/staff/:staffId'
 export const PATH_USER = '/user'
 export const PATH_GET_USER = '/user/:username'
 export const PATH_CHANGE_PASSWORD = '/user/change_password'
@@ -29,8 +30,15 @@ export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION =
   '/goal/summary/module/pagination'
 export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId'
 
+// Competencies
+export const PATH_GET_COMPETENCIES = '/competency'
+
 // Evaluations
 export const PATH_CREATE_EVALUATION = '/evaluation'
 export const PATH_UPDATE_EVALUATION = '/evaluation/:evaluationId'
 export const PATH_GET_EVALUATION = '/evaluation/:evaluationId'
 export const PATH_GET_EVALUATION_PAGINATION = '/evaluation/pagination'
+
+// Dashboard
+export const PATH_GET_DASHBOARD_SUMMARY = '/dashboard/summary'
+export const PATH_GET_DASHBOARD_ACTIVITY = '/dashboard/activity'

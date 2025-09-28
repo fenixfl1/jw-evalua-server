@@ -25,7 +25,18 @@ export class AuthService extends BaseService {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user?.PASSWORD_HASH as string)
+    const business = await this.getBusinessInfo([
+      'BUSINESS_ID',
+      'ADDRESS',
+      'NAME',
+      'PHONE',
+      'RNC',
+    ])
+
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user?.PASSWORD_HASH as string
+    )
     if (!isPasswordValid) {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
     }
@@ -55,6 +66,7 @@ export class AuthService extends BaseService {
         userId: user.USER_ID,
         name: `${user.STAFF.NAME} ${user.STAFF.LAST_NAME}`,
         avatar: user.AVATAR,
+        business,
         sessionCookie: {
           expiration: this.getSessionExpirationDate(),
           token,

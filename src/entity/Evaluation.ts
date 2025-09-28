@@ -10,8 +10,6 @@ import {
 import { BaseEntity } from './BaseEntity'
 import { Module } from './Module'
 import { Staff } from './Staff'
-import { Goal } from './Goal'
-import { GoalStaff } from './GoalStaff'
 import { EvaluationDetail } from './EvaluationDetail'
 
 const numericTransformer = {
@@ -52,20 +50,6 @@ export class Evaluation extends BaseEntity {
   })
   @JoinColumn({ name: 'EVALUATOR_ID' })
   EVALUATOR: Staff | null
-
-  @Column({ type: 'integer', nullable: true })
-  GOAL_ID: number | null
-
-  @ManyToOne(() => Goal, (goal) => goal.EVALUATIONS, { nullable: true })
-  @JoinColumn({ name: 'GOAL_ID' })
-  GOAL: Goal | null
-
-  @Column({ type: 'integer', nullable: true })
-  GOAL_STAFF_ID: number | null
-
-  @ManyToOne(() => GoalStaff, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'GOAL_STAFF_ID' })
-  GOAL_STAFF: GoalStaff | null
 
   @Column({ type: 'integer' })
   PERIOD: number

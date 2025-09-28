@@ -15,38 +15,49 @@ import { queryBuilder } from '@src/helpers/query-builder'
 
 export class StaffService extends BaseService {
   async create(payload: Staff, session: SessionInfo) {
-    try {
-      const { EMAIL, IDENTITY_DOCUMENT } = payload
+    const { EMAIL, IDENTITY_DOCUMENT } = payload
 
-      if (await this.isFieldUsed('EMAIL', EMAIL)) {
-        throw new DbConflictError(`El email: '${EMAIL}' ya esta en uso.`)
-      }
-
-      if (await this.isFieldUsed('IDENTITY_DOCUMENT', IDENTITY_DOCUMENT)) {
-        throw new DbConflictError(
-          `La cédula: '${IDENTITY_DOCUMENT}' ya esta registrada en el sistema.`
-        )
-      }
-
-      const staff = this.staffRepository.create({
-        ...payload,
-        STATE: 'A',
-        CREATED_AT: new Date(),
-        CREATED_BY: session?.userId,
-      })
-
-      await this.staffRepository.save(staff)
-
-      return this.success({ message: 'Registro completado exitosamente.' })
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.log({ error })
-      throw error
+    if (await this.isFieldUsed('EMAIL', EMAIL)) {
+      throw new DbConflictError(`El email: '${EMAIL}' ya esta en uso.`)
     }
+
+    if (await this.isFieldUsed('IDENTITY_DOCUMENT', IDENTITY_DOCUMENT)) {
+      throw new DbConflictError(
+        `La cédula: '${IDENTITY_DOCUMENT}' ya esta registrada en el sistema.`
+      )
+    }
+
+    const staff = this.staffRepository.create({
+      ...payload,
+      STATE: 'A',
+      CREATED_AT: new Date(),
+      CREATED_BY: session?.userId,
+    })
+
+    await this.staffRepository.save(staff)
+
+    return this.success({ message: 'Registro completado exitosamente.' })
   }
 
-  async update(payload: Staff): Promise<ApiResponse> {
-    return this.success({})
+  async update(payload: Staff, session: SessionInfo): Promise<ApiResponse> {
+    const { STAFF_ID, ...props } = payload
+    const staff = await this.getStaff(STAFF_ID)
+
+    await this.staffRepository.update(
+      { STAFF_ID },
+      { ...props, UPDATED_AT: new Date(), UPDATED_BY: session.userId }
+    )
+
+    return this.success({
+      data: staff,
+      message: 'Empleado actualizado con éxito',
+    })
+  }
+
+  async getOneStaff(staffId: number): Promise<ApiResponse<Staff>> {
+    const staff = await this.getStaff(staffId)
+
+    return this.success({ data: staff })
   }
 
   async getPagination(
@@ -59,18 +70,6 @@ export class StaffService extends BaseService {
       select *
         from (
         select s.*,
-                (
-                  case
-                      when exists (
-                        select 1
-                          from public."USERS" u
-                          where u."STAFF_ID" = s."STAFF_ID"
-                      ) then
-                        'S'
-                      else
-                        'N'
-                  end
-                ) "HAS_USER",
                 s."NAME"
                 || ' '
                 || s."LAST_NAME"
@@ -80,8 +79,14 @@ export class StaffService extends BaseService {
                 || ' '
                 || s."EMAIL"
                 || ' '
-                || s."PHONE" "FILTER"
+                || s."PHONE" as "FILTER",
+                sxm."MODULE_ID" as "MODULE",
+                u."USER_ID"
           from public."STAFF" s
+          left join public."STAFF_X_MODULE" sxm
+        on s."STAFF_ID" = sxm."STAFF_ID" AND sxm."STATE" = 'A'
+          left join public."USERS" u
+        on u."STAFF_ID" = s."STAFF_ID"
       ) subquery
       ${whereClause}
     `

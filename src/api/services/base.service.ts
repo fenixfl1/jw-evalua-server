@@ -93,6 +93,23 @@ export abstract class BaseService {
     return staff
   }
 
+  protected async getBusinessInfo(
+    select?: (keyof Business)[]
+  ): Promise<Business> {
+    const business = await this.businessRepository.findOne({
+      select,
+      where: {
+        STATE: 'A',
+      },
+    })
+
+    if (!business) {
+      throw new NotFoundError(`Empresa no encontrada.`)
+    }
+
+    return business
+  }
+
   protected async getUser(
     username: string,
     relations?: (keyof User)[]

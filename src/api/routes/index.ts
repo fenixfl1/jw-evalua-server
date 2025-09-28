@@ -9,6 +9,8 @@ import permissionRouter from './permission.routes'
 import moduleRouter from './module.routes'
 import goalRouter from './goal.routes'
 import evaluationRouter from './evaluation.routes'
+import competencyRouter from './competency.routes'
+import dashboardRouter from './dashboard.routes'
 
 const publicRoutes: Router[] = [authRouter]
 const privateRoutes: Router[] = [
@@ -19,7 +21,9 @@ const privateRoutes: Router[] = [
   permissionRouter,
   moduleRouter,
   goalRouter,
+  competencyRouter,
   evaluationRouter,
+  dashboardRouter,
 ]
 
 const publicRouter = Router()
