@@ -1,6 +1,7 @@
 export const PATH_CREATE_STAFF = '/staff'
 export const PATH_GET_STAFF_PAGINATION = '/staff/pagination'
 export const PATH_GET_ONE_STAFF = '/staff/:staffId'
+export const PATH_VALIDATE_IDENTITY_DOCUMENT = '/staff/identity/validate'
 export const PATH_USER = '/user'
 export const PATH_GET_USER = '/user/:username'
 export const PATH_CHANGE_PASSWORD = '/user/change_password'

@@ -54,6 +54,24 @@ export const getOneStaffController = async (
   }
 }
 
+export const validateIdentityDocumentController = async (
+  request: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { identityDocument } = request.query as { identityDocument?: string | string[] }
+    const value = Array.isArray(identityDocument)
+      ? identityDocument[0] ?? ''
+      : identityDocument ?? ''
+    const result = await staffService.validateIdentityDocument(value)
+
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const getPaginationController = async (
   request: Request,
   res: Response,

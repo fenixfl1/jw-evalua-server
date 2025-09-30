@@ -8,10 +8,14 @@ import {
   QueryParam,
   SessionInfo,
 } from '@src/types/api.types'
-import { DbConflictError } from '@src/errors/http.error'
+import { BadRequestError, DbConflictError } from '@src/errors/http.error'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
 import { paginate, paginatedQuery } from '@src/helpers/query-utils'
 import { queryBuilder } from '@src/helpers/query-builder'
+import {
+  isValidDominicanIdentityDocument,
+  normalizeIdentityDocument,
+} from '@src/helpers/identity-document'
 
 export class StaffService extends BaseService {
   async create(payload: Staff, session: SessionInfo) {
@@ -21,14 +25,26 @@ export class StaffService extends BaseService {
       throw new DbConflictError(`El email: '${EMAIL}' ya esta en uso.`)
     }
 
-    if (await this.isFieldUsed('IDENTITY_DOCUMENT', IDENTITY_DOCUMENT)) {
+    const normalizedIdentityDocument =
+      normalizeIdentityDocument(IDENTITY_DOCUMENT)
+
+    if (!isValidDominicanIdentityDocument(normalizedIdentityDocument)) {
+      throw new BadRequestError(
+        'La cedula ingresada no tiene un formato valido.'
+      )
+    }
+
+    if (
+      await this.isFieldUsed('IDENTITY_DOCUMENT', normalizedIdentityDocument)
+    ) {
       throw new DbConflictError(
-        `La cédula: '${IDENTITY_DOCUMENT}' ya esta registrada en el sistema.`
+        `La cedula: '${IDENTITY_DOCUMENT}' ya esta registrada en el sistema.`
       )
     }
 
     const staff = this.staffRepository.create({
       ...payload,
+      IDENTITY_DOCUMENT: normalizedIdentityDocument,
       STATE: 'A',
       CREATED_AT: new Date(),
       CREATED_BY: session?.userId,
@@ -43,13 +59,39 @@ export class StaffService extends BaseService {
     const { STAFF_ID, ...props } = payload
     const staff = await this.getStaff(STAFF_ID)
 
-    await this.staffRepository.update(
-      { STAFF_ID },
-      { ...props, UPDATED_AT: new Date(), UPDATED_BY: session.userId }
-    )
+    const updateData: Partial<Staff> = {
+      ...props,
+      UPDATED_AT: new Date(),
+      UPDATED_BY: session.userId,
+    }
+
+    if (
+      typeof props.IDENTITY_DOCUMENT === 'string' &&
+      props.IDENTITY_DOCUMENT
+    ) {
+      const normalizedIdentityDocument = normalizeIdentityDocument(
+        props.IDENTITY_DOCUMENT
+      )
+
+      if (
+        normalizedIdentityDocument !== staff.IDENTITY_DOCUMENT &&
+        (await this.isFieldUsed(
+          'IDENTITY_DOCUMENT',
+          normalizedIdentityDocument
+        ))
+      ) {
+        throw new DbConflictError(
+          `La cedula: '${props.IDENTITY_DOCUMENT}' ya esta registrada en el sistema.`
+        )
+      }
+
+      updateData.IDENTITY_DOCUMENT = normalizedIdentityDocument
+    }
+
+    await this.staffRepository.update({ STAFF_ID }, updateData)
 
     return this.success({
-      data: staff,
+      data: { ...staff, ...updateData },
       message: 'Empleado actualizado con éxito',
     })
   }
@@ -102,5 +144,28 @@ export class StaffService extends BaseService {
     }
 
     return this.success({ data, metadata })
+  }
+
+  async validateIdentityDocument(identityDocument: string): Promise<
+    ApiResponse<{
+      identityDocument: string
+      isValidFormat: boolean
+      isInUse: boolean
+    }>
+  > {
+    const normalizedDocument = normalizeIdentityDocument(identityDocument)
+    const isValidFormat = isValidDominicanIdentityDocument(normalizedDocument)
+
+    const isInUse = isValidFormat
+      ? await this.isFieldUsed('IDENTITY_DOCUMENT', normalizedDocument)
+      : false
+
+    return this.success({
+      data: {
+        identityDocument: normalizedDocument,
+        isValidFormat,
+        isInUse,
+      },
+    })
   }
 }
