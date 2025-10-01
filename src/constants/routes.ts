@@ -13,6 +13,7 @@ export const PATH_GET_MENU_OPTION_WITH_PERMISSIONS =
 export const PATH_GET_USER_MENU_OPTIONS = '/menu_options/:username'
 export const PATH_GET_ROLE_PAGINATION = '/role/pagination'
 export const PATH_CREATE_UPDATE_ROLE = '/role'
+export const PATH_GET_ONE_ROLE = '/role/:roleId'
 export const PATH_GET_PERMISSIONS_PAGINATION = '/permissions/pagination'
 export const PATH_CREATE_UPDATE_MODULE = '/module'
 export const PATH_GET_PAGINATED_MODULES = '/module/pagination'

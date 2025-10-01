@@ -104,7 +104,7 @@ export class UserService extends BaseService {
         })
       } catch (error) {
         // eslint-disable-next-line no-console
-        console.log({ error })
+        console.error({ error })
       }
 
       return this.success({ message: 'Usuario registrado exitosamente' })

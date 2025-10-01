@@ -10,96 +10,98 @@ import {
 
 @EventSubscriber()
 export class GlobalActivitySubscriber implements EntitySubscriberInterface {
-  /**
-   * Se llama en cualquier inserción
-   */
   async afterInsert(event: InsertEvent<any>) {
-    if (event.metadata.name === 'ActivityLog') return // Evitar loop
+    if (event.metadata.name === 'ActivityLog') return
+    const userId = this.getUserId()
+    if (!userId) return
 
-    if (this.getUserId()) {
-      const log = new ActivityLog()
-      log.USER_ID = this.getUserId()
-      log.ACTION = 'INSERT'
-      log.MODEL = event.metadata.name
-      log.OBJECT_ID = this.getEntityId(event)
-      log.CHANGES = event.entity
+    const { objectId, compositeId } = this.extractObjectId(event)
 
-      await event.manager.getRepository(ActivityLog).save(log)
-    }
+    const log = new ActivityLog()
+    log.USER_ID = userId
+    log.ACTION = 'INSERT'
+    log.MODEL = event.metadata.name
+    log.OBJECT_ID = objectId as never // <-- null si PK compuesta
+    // En CHANGES incluimos además el compositeId si existe
+    log.CHANGES = { __id: compositeId ?? objectId, ...event.entity }
+
+    await event.manager.getRepository(ActivityLog).save(log)
   }
 
-  /**
-   * Se llama en cualquier actualización
-   */
   async afterUpdate(event: UpdateEvent<any>) {
     if (event.metadata.name === 'ActivityLog') return
+    const userId = this.getUserId()
+    if (!userId) return
 
-    if (this.getUserId()) {
-      const log = new ActivityLog()
-      log.USER_ID = this.getUserId()
-      log.ACTION = 'UPDATE'
-      log.MODEL = event.metadata.name
-      log.OBJECT_ID = this.getEntityId(event)
-      log.CHANGES = event.updatedColumns.reduce((changes, col) => {
-        changes[col.propertyName] = (event.entity as any)[col.propertyName]
-        return changes
-      }, {} as Record<string, any>)
+    const { objectId, compositeId } = this.extractObjectId(event)
 
-      await event.manager.getRepository(ActivityLog).save(log)
-    }
+    const changes = event.updatedColumns.reduce((acc, col) => {
+      acc[col.propertyName] = (event.entity as any)?.[col.propertyName]
+      return acc
+    }, {} as Record<string, any>)
+
+    const log = new ActivityLog()
+    log.USER_ID = userId
+    log.ACTION = 'UPDATE'
+    log.MODEL = event.metadata.name
+    log.OBJECT_ID = objectId as never
+    log.CHANGES = { __id: compositeId ?? objectId, ...changes }
+
+    await event.manager.getRepository(ActivityLog).save(log)
   }
 
-  /**
-   * Se llama en cualquier eliminación
-   */
   async afterRemove(event: RemoveEvent<any>) {
     if (event.metadata.name === 'ActivityLog') return
+    const userId = this.getUserId()
+    if (!userId) return
 
-    if (this.getUserId()) {
-      const log = new ActivityLog()
-      log.USER_ID = this.getUserId()
-      log.ACTION = 'DELETE'
-      log.MODEL = event.metadata.name
-      log.OBJECT_ID = this.getEntityId(event)
-      log.CHANGES = event.entity ?? null
+    const { objectId, compositeId } = this.extractObjectId(event)
 
-      await event.manager.getRepository(ActivityLog).save(log)
-    }
+    const log = new ActivityLog()
+    log.USER_ID = userId
+    log.ACTION = 'DELETE'
+    log.MODEL = event.metadata.name
+    log.OBJECT_ID = objectId as never
+    log.CHANGES = { __id: compositeId ?? objectId, ...(event.entity ?? {}) }
+
+    await event.manager.getRepository(ActivityLog).save(log)
+  }
+
+  private getUserId(): number | null {
+    const storage = asyncLocalStorage.getStore()
+    return storage?.userId ?? null
   }
 
   /**
-   * Método auxiliar: obtener el ID del usuario actual.
-   * Esto depende de cómo pases el usuario en el contexto de la request.
+   * Si la PK es simple -> objectId = número/string, compositeId = null
+   * Si la PK es compuesta -> objectId = null, compositeId = objeto { col: valor, ... }
    */
-  private getUserId(): number {
-    const storage = asyncLocalStorage.getStore()
+  private extractObjectId(
+    event: InsertEvent<any> | UpdateEvent<any> | RemoveEvent<any>
+  ): {
+    objectId: number | string | null
+    compositeId: Record<string, any> | null
+  } {
+    const cols = event.metadata.primaryColumns
+    if (!cols || cols.length === 0) return { objectId: null, compositeId: null }
 
-    return storage?.userId
-  }
+    // Intentar leer desde entity; si no, de databaseEntity
+    const readValue = (prop: string) =>
+      (event as any).entity?.[prop] ?? (event as any).databaseEntity?.[prop]
 
-  private getEntityId(event: any) {
-    const primaryColumns = event.metadata.primaryColumns
-
-    if (!primaryColumns || primaryColumns.length === 0) {
-      return null
+    if (cols.length === 1) {
+      const prop = cols[0].propertyName
+      const val = readValue(prop)
+      // Sólo aceptamos simple
+      if (val == null) return { objectId: null, compositeId: null }
+      return { objectId: val, compositeId: null }
     }
 
-    // Si hay una sola clave primaria
-    if (primaryColumns.length === 1) {
-      const primaryColumn = primaryColumns[0]
-      return (
-        event.entity?.[primaryColumn.propertyName] ??
-        event.databaseEntity?.[primaryColumn.propertyName]
-      )
+    // Compuesta
+    const idObj: Record<string, any> = {}
+    for (const c of cols) {
+      idObj[c.propertyName] = readValue(c.propertyName)
     }
-
-    // Si hay múltiples claves primarias (composite key)
-    const id: Record<string, any> = {}
-    for (const column of primaryColumns) {
-      id[column.propertyName] =
-        event.entity?.[column.propertyName] ??
-        event.databaseEntity?.[column.propertyName]
-    }
-    return id
+    return { objectId: null, compositeId: idObj }
   }
 }
