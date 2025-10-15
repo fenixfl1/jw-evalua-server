@@ -123,7 +123,9 @@ export class UserService extends BaseService {
         where: { USERNAME, USER_ID },
       })
 
-      await manager.update(User, { USERNAME, USER_ID }, { ...restProps })
+      if (Object.keys(restProps ?? {}).length) {
+        await manager.update(User, { USERNAME, USER_ID }, { ...restProps })
+      }
 
       const userRoles = await this.userRolesRepository.find({
         where: {
@@ -227,17 +229,19 @@ export class UserService extends BaseService {
         S."LAST_NAME",
         S."EMAIL",
         S."PHONE",
+        S."STAFF_ID",
+        STRING_AGG(RXU."ROLE_ID"::TEXT, ', ') AS "ROLE_ID",
         STRING_AGG(R."NAME", ', ') AS "ROLES",
         S."NAME" || ' ' || S."LAST_NAME" || ' ' || U."USERNAME"  || ' ' || S."PHONE" AS "FILTER"
       FROM  
         public."USERS" AS U
         LEFT JOIN public."STAFF" AS S ON S."STAFF_ID" = U."STAFF_ID"
-        LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID"
+        LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID" AND RXU."STATE" = 'A'
         LEFT JOIN public."ROLE" AS R ON R."ROLE_ID" = RXU."ROLE_ID"
         LEFT JOIN public."STAFF" c ON c."STAFF_ID" = U."CREATED_BY"
       GROUP BY 
         U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
-        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",
+        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",S."STAFF_ID",
         C."NAME", C."LAST_NAME"
       ) AS SUBQUERY
       ${whereClause}

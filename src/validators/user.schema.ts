@@ -19,13 +19,7 @@ export const updateUseSchema = Joi.object({
   AVATAR: Joi.string().allow(null).optional(),
   ROLE_ID: Joi.number().optional(),
   STATE: Joi.string().valid('A', 'I').optional(),
-  USERNAME: Joi.string()
-    .pattern(/^[a-zA-Z0-9_]+$/)
-    .required()
-    .messages({
-      'string.pattern.base':
-        'USERNAME solo puede contener letras, números y guion bajo (_), sin caracteres especiales ni espacios.',
-    }),
+  USERNAME: Joi.string().optional(),
 })
 
 export const changePasswordSchema = Joi.object({
