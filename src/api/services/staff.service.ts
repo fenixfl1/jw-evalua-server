@@ -109,27 +109,53 @@ export class StaffService extends BaseService {
     const { values, whereClause } = whereClauseBuilder(payload)
 
     const statement = `
-      select *
-        from (
+      SELECT
+        *
+      FROM (
+        with base as (
         select s.*,
                 s."NAME"
                 || ' '
                 || s."LAST_NAME"
                 || ' '
                 || s."STAFF_ID"
+                || ' '
                 || s."IDENTITY_DOCUMENT"
                 || ' '
                 || s."EMAIL"
                 || ' '
                 || s."PHONE" as "FILTER",
-                sxm."MODULE_ID" as "MODULE",
-                u."USER_ID"
+                u."USER_ID",
+          -- Trae módulos (activos e inactivos)
+                sxm."MODULE_ID" as "RAW_MODULE_ID",
+                sxm."STATE" as "MODULE_STATE",
+                sxm."UPDATED_AT" as "MODULE_UPDATED_AT",
+                row_number()
+                over(partition by s."STAFF_ID"
+                    order by(sxm."STATE" = 'A') desc,              -- 3) desempate por usuario
+                            s."UPDATED_AT" desc nulls last
+                ) as rn
           from public."STAFF" s
-          left join public."STAFF_X_MODULE" sxm
-        on s."STAFF_ID" = sxm."STAFF_ID" AND sxm."STATE" = 'A'
           left join public."USERS" u
         on u."STAFF_ID" = s."STAFF_ID"
-      ) subquery
+          left join public."STAFF_X_MODULE" sxm
+        on sxm."STAFF_ID" = u."STAFF_ID"       -- NO filtramos STATE aquí
+      )
+      select s.*,
+            base."FILTER",
+            base."USER_ID",
+        /* Si la fila elegida no es activa, deja NULL el módulo */
+            case
+                when base."MODULE_STATE" = 'A' then
+                  base."RAW_MODULE_ID"
+                else
+                  null
+            end as "ACTIVE_MODULE_ID"
+        from base
+        join public."STAFF" s
+      on s."STAFF_ID" = base."STAFF_ID"
+      where base.rn = 1
+      ) AS SUBQUERY
       ${whereClause}
     `
 

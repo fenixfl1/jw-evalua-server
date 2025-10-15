@@ -77,7 +77,7 @@ export const getUerController = async (
 ): Promise<void> => {
   try {
     const { username } = request.params
-    const result = await userService.getUer(username)
+    const result = await userService.getOneUer(username)
 
     return sendResponse(res, result)
   } catch (error) {

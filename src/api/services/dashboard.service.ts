@@ -230,6 +230,7 @@ export class DashboardService extends BaseService {
     return { clause: `WHERE ${conditions.join(' AND ')}`, params }
   }
 
+
   private buildModuleWhereClause(filters: DashboardSummaryFilters): {
     clause: string
     params: Record<string, unknown>
@@ -614,20 +615,59 @@ export class DashboardService extends BaseService {
   private async getStaffDistribution(
     filters: DashboardSummaryFilters
   ): Promise<StaffDistributionEntry[]> {
-    const staffWhere = this.buildStaffWhereClause(filters)
+    const params: Record<string, unknown> = {}
+    const conditions: string[] = []
+
+    if (filters.moduleId) {
+      conditions.push('sel."MODULE_ID" = :moduleId')
+      params.moduleId = filters.moduleId
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(' AND ')}`
+      : ''
+
     const sql = `
+      WITH assignments AS (
+        SELECT
+          s."STAFF_ID",
+          sxm."MODULE_ID",
+          sxm."STATE" AS "MODULE_STATE",
+          COALESCE(sxm."UPDATED_AT", sxm."CREATED_AT") AS "ASSIGNED_AT",
+          ROW_NUMBER() OVER (
+            PARTITION BY s."STAFF_ID"
+            ORDER BY
+              (sxm."STATE" = 'A') DESC,
+              COALESCE(sxm."UPDATED_AT", sxm."CREATED_AT") DESC NULLS LAST,
+              sxm."STAFF_MODULE_ID" DESC
+          ) AS rn
+        FROM public."STAFF" s
+        LEFT JOIN public."STAFF_X_MODULE" sxm
+          ON sxm."STAFF_ID" = s."STAFF_ID"
+        WHERE s."STATE" = 'A'
+      ),
+      selected AS (
+        SELECT
+          CASE
+            WHEN assignments."MODULE_STATE" = 'A' THEN assignments."MODULE_ID"
+            ELSE NULL
+          END AS "MODULE_ID",
+          assignments."STAFF_ID"
+        FROM assignments
+        WHERE assignments.rn = 1
+      )
       SELECT
-        s."MODULE_ID" AS "MODULE_ID",
+        sel."MODULE_ID" AS "MODULE_ID",
         m."DESCRIPTION" AS "MODULE_NAME",
         COUNT(*)::int AS "STAFF_COUNT"
-      FROM public."STAFF" s
-      LEFT JOIN public."MODULE" m ON m."MODULE_ID" = s."MODULE_ID"
-      ${staffWhere.clause}
-      GROUP BY s."MODULE_ID", m."DESCRIPTION"
+      FROM selected sel
+      LEFT JOIN public."MODULE" m ON m."MODULE_ID" = sel."MODULE_ID"
+      ${whereClause}
+      GROUP BY sel."MODULE_ID", m."DESCRIPTION"
       ORDER BY "STAFF_COUNT" DESC
     `
 
-    const query = preparePostgresQuery(sql, staffWhere.params)
+    const query = preparePostgresQuery(sql, params)
     const rows = await queryRunner<{
       MODULE_ID: number | null
       MODULE_NAME: string | null

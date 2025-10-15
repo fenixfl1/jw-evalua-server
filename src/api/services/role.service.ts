@@ -83,94 +83,86 @@ export class RoleService extends BaseService {
     const { ROLE_ID, PERMISSIONS, ...restProps } = payload
 
     return this.dataSource.transaction(async (manager) => {
-      try {
-        const user = await this.getUser(session.username)
+      const user = await this.getUser(session.username)
 
-        // 1) Verificar que el rol exista
-        const role = await manager.getRepository(Role).findOneBy({ ROLE_ID })
-        if (!role) throw new NotFoundError(`Rol con id '${ROLE_ID}' no existe.`)
+      // 1) Verificar que el rol exista
+      const role = await manager.getRepository(Role).findOneBy({ ROLE_ID })
+      if (!role) throw new NotFoundError(`Rol con id '${ROLE_ID}' no existe.`)
 
-        // 2) Actualizar datos del rol (nombre, descripción, etc.)
-        if (Object.keys(restProps).length) {
-          await manager
-            .getRepository(Role)
-            .update({ ROLE_ID }, { ...restProps })
-        }
-
-        // 3) Sincronizar permisos solo si viene la lista (permite "no tocar" si es undefined)
-        if (Array.isArray(PERMISSIONS)) {
-          const prRepo = manager.getRepository(PermissionRole)
-
-          // Traer estado actual
-          const existing = await prRepo.find({
-            where: { ROLE_ID }, // si usas relación: where: { ROLE: { ROLE_ID } as any }
-            select: { PERMISSION_ID: true, STATE: true },
-          })
-
-          const incoming = new Set(PERMISSIONS) // dedupe
-          const byPermId = new Map(existing.map((e) => [e.PERMISSION_ID, e]))
-
-          const toActivate: number[] = []
-          const toDeactivate: number[] = []
-          const toCreate: PermissionRole[] = []
-
-          // decidir activaciones/desactivaciones
-          for (const row of existing) {
-            const isInPayload = incoming.has(row.PERMISSION_ID)
-            if (isInPayload) {
-              if (row.STATE !== 'A') toActivate.push(row.PERMISSION_ID)
-            } else {
-              if (row.STATE === 'A') toDeactivate.push(row.PERMISSION_ID)
-            }
-          }
-
-          // decidir creaciones
-          for (const permId of incoming) {
-            if (!byPermId.has(permId)) {
-              toCreate.push(
-                prRepo.create({
-                  ROLE_ID, // si usas relación: ROLE: { ROLE_ID } as any
-                  PERMISSION_ID: permId,
-                  STATE: 'A',
-                  CREATED_AT: new Date(),
-                  CREATED_BY: user.USER_ID,
-                })
-              )
-            }
-          }
-
-          // ejecutar cambios (nota: estas actualizaciones NO disparan subscribers)
-          if (toActivate.length) {
-            await prRepo
-              .createQueryBuilder()
-              .update()
-              .set({ STATE: 'A', UPDATED_AT: new Date() })
-              .where('ROLE_ID = :ROLE_ID', { ROLE_ID })
-              .andWhere('PERMISSION_ID IN (:...ids)', { ids: toActivate })
-              .execute()
-          }
-
-          if (toDeactivate.length) {
-            await prRepo
-              .createQueryBuilder()
-              .update()
-              .set({ STATE: 'I', UPDATED_AT: new Date() })
-              .where('ROLE_ID = :ROLE_ID', { ROLE_ID })
-              .andWhere('PERMISSION_ID IN (:...ids)', { ids: toDeactivate })
-              .execute()
-          }
-
-          if (toCreate.length) {
-            await prRepo.insert(toCreate) // bulk insert
-          }
-        }
-
-        return this.success({ message: 'Rol actualizado exitosamente.' })
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.log({ error })
-        throw error
+      // 2) Actualizar datos del rol (nombre, descripción, etc.)
+      if (Object.keys(restProps).length) {
+        await manager.getRepository(Role).update({ ROLE_ID }, { ...restProps })
       }
+
+      // 3) Sincronizar permisos solo si viene la lista (permite "no tocar" si es undefined)
+      if (Array.isArray(PERMISSIONS)) {
+        const prRepo = manager.getRepository(PermissionRole)
+
+        // Traer estado actual
+        const existing = await prRepo.find({
+          where: { ROLE_ID }, // si usas relación: where: { ROLE: { ROLE_ID } as any }
+          select: { PERMISSION_ID: true, STATE: true },
+        })
+
+        const incoming = new Set(PERMISSIONS) // dedupe
+        const byPermId = new Map(existing.map((e) => [e.PERMISSION_ID, e]))
+
+        const toActivate: number[] = []
+        const toDeactivate: number[] = []
+        const toCreate: PermissionRole[] = []
+
+        // decidir activaciones/desactivaciones
+        for (const row of existing) {
+          const isInPayload = incoming.has(row.PERMISSION_ID)
+          if (isInPayload) {
+            if (row.STATE !== 'A') toActivate.push(row.PERMISSION_ID)
+          } else {
+            if (row.STATE === 'A') toDeactivate.push(row.PERMISSION_ID)
+          }
+        }
+
+        // decidir creaciones
+        for (const permId of incoming) {
+          if (!byPermId.has(permId)) {
+            toCreate.push(
+              prRepo.create({
+                ROLE_ID, // si usas relación: ROLE: { ROLE_ID } as any
+                PERMISSION_ID: permId,
+                STATE: 'A',
+                CREATED_AT: new Date(),
+                CREATED_BY: user.USER_ID,
+              })
+            )
+          }
+        }
+
+        // ejecutar cambios (nota: estas actualizaciones NO disparan subscribers)
+        if (toActivate.length) {
+          await prRepo
+            .createQueryBuilder()
+            .update()
+            .set({ STATE: 'A', UPDATED_AT: new Date() })
+            .where('ROLE_ID = :ROLE_ID', { ROLE_ID })
+            .andWhere('PERMISSION_ID IN (:...ids)', { ids: toActivate })
+            .execute()
+        }
+
+        if (toDeactivate.length) {
+          await prRepo
+            .createQueryBuilder()
+            .update()
+            .set({ STATE: 'I', UPDATED_AT: new Date() })
+            .where('ROLE_ID = :ROLE_ID', { ROLE_ID })
+            .andWhere('PERMISSION_ID IN (:...ids)', { ids: toDeactivate })
+            .execute()
+        }
+
+        if (toCreate.length) {
+          await prRepo.insert(toCreate) // bulk insert
+        }
+      }
+
+      return this.success({ message: 'Rol actualizado exitosamente.' })
     })
   }
 
@@ -215,8 +207,15 @@ export class RoleService extends BaseService {
     const statement = `
       SELECT 
         *
+      FROM  (
+        SELECT 
+        r.*,
+        s."NAME" || ' ' || s."LAST_NAME" AS "CREATOR"
       FROM 
-        public."ROLE"
+        public."ROLE" r
+        LEFT JOIN public."USERS" u ON  u."USER_ID" = r."CREATED_BY"
+        LEFT JOIN public."STAFF" s ON s."STAFF_ID" = u."STAFF_ID"
+      ) AS subquery
       ${whereClause}
     `
 

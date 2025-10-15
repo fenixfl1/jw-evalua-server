@@ -25,9 +25,15 @@ class EmailService extends BaseService {
     const emailConfig = await getEmailConfig()
     const transporter = nodemailer.createTransport(emailConfig)
 
+    const business = await this.getBusinessInfo()
+
     const html = await compileTemplate(
       templateName,
-      convertKeysToLowercase(record)
+      convertKeysToLowercase({
+        ...record,
+        year: new Date().getFullYear(),
+        business,
+      })
     )
 
     const info = await transporter.sendMail({

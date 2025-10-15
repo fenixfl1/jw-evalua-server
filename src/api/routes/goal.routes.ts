@@ -16,6 +16,7 @@ import {
   assignGoalStaffSchema,
   createGoalSchema,
   postProgressSchema,
+  updateGoalSchema,
 } from '@src/validators/goal.schema'
 import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
 import {
@@ -28,15 +29,15 @@ import {
   postGoalProgressController,
   getGoalsByModuleController,
   getGoalsPaginationController,
+  updateController,
 } from '../controllers/goal.controller'
 
 const goalRouter = Router()
 
-goalRouter.post(
-  PATH_CREATE_GOAL,
-  validateSchema(createGoalSchema),
-  createGoalController
-)
+goalRouter
+  .route(PATH_CREATE_GOAL)
+  .post(validateSchema(createGoalSchema), createGoalController)
+  .put(validateSchema(updateGoalSchema), updateController)
 
 goalRouter.post(
   PATH_ASSIGN_GOAL_STAFF,

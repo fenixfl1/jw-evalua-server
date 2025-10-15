@@ -37,8 +37,8 @@ interface ChangePasswordPayload {
 }
 
 export class UserService extends BaseService {
-  userRolesRepository: Repository<UserRoles>
-  roleRepository: Repository<Role>
+  private userRolesRepository: Repository<UserRoles>
+  private roleRepository: Repository<Role>
 
   constructor() {
     super()
@@ -98,12 +98,11 @@ export class UserService extends BaseService {
             ...staff,
             USERNAME,
             password,
-            url: process.env.ADMIN_APP_URL,
+            url: process.env.APP_URL,
           },
           text: '',
         })
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error({ error })
       }
 
@@ -149,7 +148,7 @@ export class UserService extends BaseService {
         })
       }
 
-      const { data } = await this.getUer(USERNAME)
+      const { data } = await this.getOneUer(USERNAME)
 
       return this.success({ data })
     })
@@ -222,6 +221,8 @@ export class UserService extends BaseService {
         U."IS_ACTIVE",
         U."AVATAR",
         U."STATE",
+        U."CREATED_AT",
+        C."NAME" || ' ' || C."LAST_NAME" as "CREATED_BY",
         S."NAME",
         S."LAST_NAME",
         S."EMAIL",
@@ -233,9 +234,11 @@ export class UserService extends BaseService {
         LEFT JOIN public."STAFF" AS S ON S."STAFF_ID" = U."STAFF_ID"
         LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID"
         LEFT JOIN public."ROLE" AS R ON R."ROLE_ID" = RXU."ROLE_ID"
+        LEFT JOIN public."STAFF" c ON c."STAFF_ID" = U."CREATED_BY"
       GROUP BY 
         U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
-        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE"
+        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",
+        C."NAME", C."LAST_NAME"
       ) AS SUBQUERY
       ${whereClause}
       `
@@ -254,7 +257,7 @@ export class UserService extends BaseService {
   }
 
   @CatchServiceError()
-  async getUer(username: string): Promise<ApiResponse> {
+  async getOneUer(username: string): Promise<ApiResponse<User>> {
     const statement = `
       SELECT 
         *

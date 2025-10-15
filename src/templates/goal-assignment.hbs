@@ -1,0 +1,78 @@
+<html lang='es'>
+  <head>
+    <meta charset='utf-8' />
+    <title>Nueva meta asignada</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #222222; margin: 0; padding:
+      0; background-color: #fafafa; } .container { max-width: 620px; margin: 0
+      auto; background-color: #ffffff; padding: 24px 28px; border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); } .highlight { font-weight:
+      bold; color: #0050b3; } .section { margin-bottom: 18px; } .footer {
+      margin-top: 24px; font-size: 13px; line-height: 1.5; color: #666666;
+      text-align: center; } .tag { display: inline-block; padding: 6px 10px;
+      border-radius: 16px; background-color: #f0f5ff; color: #0050b3;
+      font-size: 12px; margin-bottom: 12px; text-transform: uppercase;
+      letter-spacing: 0.8px; } .metric { font-size: 16px; margin: 6px 0; }
+      .metric span { display: inline-block; min-width: 160px; font-weight:
+      bold; } a { color: #0050b3; }
+    </style>
+  </head>
+  <body>
+    <div class='container'>
+      <div class='tag'>Nueva meta</div>
+      <div class='section'>
+        <p>Hola {{staffname}},</p>
+        <p>
+          Se ha definido una nueva meta para el modulo
+          <span class='highlight'>{{modulename}}</span>.
+        </p>
+      </div>
+      <div class='section'>
+        <div class='metric'>
+          <span>Meta:</span>
+          {{goaldescription}}
+        </div>
+        <div class='metric'>
+          <span>Periodo:</span>
+          {{periodlabel}}
+        </div>
+        <div class='metric'>
+          <span>Objetivo del modulo:</span>
+          {{totaltargetformatted}}
+        </div>
+        <div class='metric'>
+          <span>Tu objetivo asignado:</span>
+          {{individualtargetformatted}}
+        </div>
+        <div class='metric'>
+          <span>Identificador:</span>
+          Meta {{goalid}} - Modulo {{moduleid}}
+        </div>
+      </div>
+      {{#if supervisorname}}
+        <div class='section'>
+          <p>
+            Supervisor responsable:
+            <span class='highlight'>{{supervisorname}}</span>
+            {{#if supervisoremail}}
+              (<a href='mailto:{{supervisoremail}}'>{{supervisoremail}}</a>)
+            {{/if}}
+          </p>
+        </div>
+      {{/if}}
+      <div class='section'>
+        <p>
+          Te recomendamos revisar la planificacion con tu equipo para asegurar
+          el cumplimiento de la meta. Si tienes preguntas, escribe a tu
+          supervisor o al area de soporte.
+        </p>
+      </div>
+      <p>Muchos exitos!<br />Equipo de Evaluaciones</p>
+      <div class='footer'>
+        Este mensaje fue generado automaticamente, no respondas a este correo.
+        <br />
+        (c) {{year}} {{business.name}}. Todos los derechos reservados.
+      </div>
+    </div>
+  </body>
+</html>

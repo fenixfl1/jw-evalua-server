@@ -66,3 +66,17 @@ export const createOrUpdateMembersController = async (
     next(error)
   }
 }
+
+export const getModuleMembersController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await moduleService.getModuleMembers(req.body)
+
+    sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}

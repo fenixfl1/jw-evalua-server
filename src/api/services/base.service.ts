@@ -83,11 +83,11 @@ export abstract class BaseService {
     return result !== null
   }
 
-  protected async getStaff(userId: number): Promise<Staff> {
-    const staff = await this.staffRepository.findOneBy({ STAFF_ID: userId })
+  protected async getStaff(staffId: number): Promise<Staff> {
+    const staff = await this.staffRepository.findOneBy({ STAFF_ID: staffId })
 
     if (!staff) {
-      throw new NotFoundError(`Empleado con id "${userId}" no encontrado.`)
+      throw new NotFoundError(`Empleado con id "${staffId}" no encontrado.`)
     }
 
     return staff

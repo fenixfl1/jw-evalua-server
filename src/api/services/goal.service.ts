@@ -1,4 +1,4 @@
-import { In, Repository } from 'typeorm'
+import { EntityManager, In, Repository } from 'typeorm'
 import { BaseService, CatchServiceError } from './base.service'
 import { Goal } from '@src/entity/Goal'
 import { GoalScope } from '@src/entity/goal-scope.enum'
@@ -7,6 +7,9 @@ import { GoalModule } from '@src/entity/GoalModule'
 import { GoalProgress } from '@src/entity/GoalProgress'
 import { Module } from '@src/entity/Module'
 import { Staff } from '@src/entity/Staff'
+import { StaffModule } from '@src/entity/StaffXModule'
+import { GoalDailyTarget } from '@src/entity/GoalDailyTarget'
+import { publishEmailToQueue } from './email/email-producer.service'
 import {
   AdvancedCondition,
   ApiResponse,
@@ -15,9 +18,16 @@ import {
 } from '@src/types/api.types'
 import { paginatedQuery } from '@src/helpers/query-utils'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
-import { NotFoundError } from '@src/errors/http.error'
+import { BadRequestError, NotFoundError } from '@src/errors/http.error'
 
-interface CreateGoalPayload extends Goal {}
+interface GoalDailyTargetPayload {
+  TARGET_DATE: string | Date
+  TARGET_VALUE: number
+}
+
+interface CreateGoalPayload extends Omit<Goal, 'DAILY_TARGETS'> {
+  DAILY_TARGETS?: GoalDailyTargetPayload[]
+}
 
 interface AssignToStaffPayload {
   GOAL_ID: number
@@ -30,6 +40,12 @@ interface AssignToModulePayload {
   MODULE_ID: number
   PERIOD: number
   TARGET_VALUE: number
+  DAILY_TARGETS?: GoalDailyTargetPayload[]
+}
+
+interface ProgressContributionPayload {
+  STAFF_ID: number
+  ACTUAL_VALUE: number
 }
 
 interface PostProgressPayload {
@@ -39,6 +55,7 @@ interface PostProgressPayload {
   ACTUAL_VALUE: number
   STAFF_ID?: number
   MODULE_ID?: number
+  CONTRIBUTIONS?: ProgressContributionPayload[]
 }
 
 interface StaffSummaryPayload {
@@ -56,8 +73,10 @@ export class GoalService extends BaseService {
   private goalStaffRepository: Repository<GoalStaff>
   private goalModuleRepository: Repository<GoalModule>
   private goalProgressRepository: Repository<GoalProgress>
+  private goalDailyTargetRepository: Repository<GoalDailyTarget>
   private moduleRepository: Repository<Module>
   private staffRepositoryLocal: Repository<Staff>
+  private staffModuleRepository: Repository<StaffModule>
 
   constructor() {
     super()
@@ -65,8 +84,105 @@ export class GoalService extends BaseService {
     this.goalStaffRepository = this.dataSource.getRepository(GoalStaff)
     this.goalModuleRepository = this.dataSource.getRepository(GoalModule)
     this.goalProgressRepository = this.dataSource.getRepository(GoalProgress)
+    this.goalDailyTargetRepository =
+      this.dataSource.getRepository(GoalDailyTarget)
     this.moduleRepository = this.dataSource.getRepository(Module)
     this.staffRepositoryLocal = this.dataSource.getRepository(Staff)
+    this.staffModuleRepository = this.dataSource.getRepository(StaffModule)
+  }
+
+  private getIsoWeekId(date: Date): number {
+    const utcDate = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    )
+    const day = utcDate.getUTCDay() || 7
+    utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day)
+    const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1))
+    const week = Math.ceil(
+      ((utcDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+    )
+    return utcDate.getUTCFullYear() * 100 + week
+  }
+
+  private toDateOnly(value: string | Date): Date {
+    if (value instanceof Date) {
+      return new Date(
+        Date.UTC(
+          value.getUTCFullYear(),
+          value.getUTCMonth(),
+          value.getUTCDate()
+        )
+      )
+    }
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.valueOf())) {
+      throw new BadRequestError('Fecha de objetivo diario invalida.')
+    }
+    return new Date(
+      Date.UTC(
+        parsed.getUTCFullYear(),
+        parsed.getUTCMonth(),
+        parsed.getUTCDate()
+      )
+    )
+  }
+
+  private async replaceDailyTargets(
+    goalModuleId: number,
+    targets: GoalDailyTargetPayload[],
+    session: SessionInfo,
+    manager?: EntityManager
+  ): Promise<void> {
+    try {
+      if (!targets.length) return
+
+      const dateEntries = targets.map((item) => {
+        const normalizedDate = this.toDateOnly(item.TARGET_DATE)
+        const period = this.getIsoWeekId(normalizedDate)
+        return {
+          period,
+          targetDate: normalizedDate.toISOString().slice(0, 10),
+          targetValue: Number(item.TARGET_VALUE ?? 0),
+        }
+      })
+
+      const periods = Array.from(
+        new Set(dateEntries.map((item) => item.period))
+      )
+      const now = new Date()
+
+      const repository = manager
+        ? manager.getRepository(GoalDailyTarget)
+        : this.goalDailyTargetRepository
+
+      const updateBuilder = repository
+        .createQueryBuilder()
+        .update()
+        .set({
+          STATE: 'I',
+          UPDATED_AT: now,
+          UPDATED_BY: session.userId,
+        })
+        .where('GOAL_MODULE_ID = :goalModuleId', { goalModuleId })
+        .andWhere('PERIOD IN (:...periods)', { periods })
+      await updateBuilder.execute()
+
+      const records = dateEntries.map(({ period, targetDate, targetValue }) =>
+        repository.create({
+          GOAL_MODULE_ID: goalModuleId,
+          PERIOD: period,
+          TARGET_DATE: targetDate,
+          TARGET_VALUE: targetValue,
+          CREATED_AT: now,
+          CREATED_BY: session.userId,
+          STATE: 'A',
+        } as never)
+      )
+
+      await repository.save(records as never)
+    } catch (error) {
+      throw error
+    }
   }
 
   @CatchServiceError()
@@ -79,7 +195,7 @@ export class GoalService extends BaseService {
       CREATED_AT: new Date(),
       CREATED_BY: session.userId,
       STATE: 'A',
-    })
+    } as never)
 
     await this.goalRepository.save(goal)
     return this.success({ message: 'Meta creada con éxito.', data: goal })
@@ -123,21 +239,217 @@ export class GoalService extends BaseService {
     const goal = await this.goalRepository.findOne({ where: { GOAL_ID } })
     if (!goal) throw new NotFoundError('Meta no encontrada.')
 
-    const module = await this.moduleRepository.findOne({ where: { MODULE_ID } })
+    const module = await this.moduleRepository.findOne({
+      where: { MODULE_ID },
+      relations: ['SUPERVISOR', 'SUPERVISOR.STAFF'],
+    })
     if (!module) throw new NotFoundError('Módulo no encontrado.')
 
-    const record = this.goalModuleRepository.create({
-      GOAL_ID,
-      MODULE_ID,
-      PERIOD,
+    if (goal.SCOPE !== GoalScope.MODULE) {
+      throw new BadRequestError(
+        'La meta debe ser de alcance modulo para asignarse a un modulo.'
+      )
+    }
+
+    if (!Number.isFinite(TARGET_VALUE)) {
+      throw new BadRequestError('El objetivo debe ser un numero valido.')
+    }
+
+    if (TARGET_VALUE < 0) {
+      throw new BadRequestError('El objetivo debe ser mayor o igual a cero.')
+    }
+
+    if (!Number.isInteger(TARGET_VALUE)) {
+      throw new BadRequestError(
+        'El objetivo debe ser un numero entero para distribuirse entre el personal.'
+      )
+    }
+
+    const activeMembers = await this.getActiveModuleMembers(MODULE_ID)
+    if (!activeMembers.length) {
+      throw new BadRequestError(
+        'El modulo seleccionado no tiene miembros activos para distribuir la meta.'
+      )
+    }
+
+    const distributedTargets = this.distributeTarget(
       TARGET_VALUE,
-      CREATED_AT: new Date(),
-      CREATED_BY: session.userId,
-      STATE: 'A',
+      activeMembers.length
+    )
+    const staffTargets = activeMembers.map((staff, index) => ({
+      staff,
+      target: distributedTargets[index] ?? 0,
+    }))
+    const now = new Date()
+
+    await this.dataSource.transaction(async (manager) => {
+      const goalModuleRepo = manager.getRepository(GoalModule)
+      const goalStaffRepo = manager.getRepository(GoalStaff)
+
+      const record = goalModuleRepo.create({
+        GOAL_ID,
+        MODULE_ID,
+        PERIOD,
+        TARGET_VALUE,
+        CREATED_AT: now,
+        CREATED_BY: session.userId,
+        STATE: 'A',
+      })
+
+      await goalModuleRepo.save(record)
+
+      if (payload.DAILY_TARGETS?.length) {
+        await this.replaceDailyTargets(
+          record.GOAL_MODULE_ID,
+          payload.DAILY_TARGETS,
+          session,
+          manager
+        )
+      }
+
+      try {
+        const staffAssignments = activeMembers.map((staff, index) =>
+          goalStaffRepo.create({
+            GOAL_ID,
+            STAFF_ID: staff.STAFF_ID,
+            PERIOD,
+            TARGET_VALUE: distributedTargets[index],
+            WEIGHT: goal.WEIGHT as never,
+            CREATED_AT: now,
+            CREATED_BY: session.userId,
+            STATE: 'A',
+          })
+        )
+
+        await goalStaffRepo.save(staffAssignments)
+      } catch (error) {
+        throw error
+      }
     })
 
-    await this.goalModuleRepository.save(record)
-    return this.success({ message: 'Meta asignada al módulo con éxito.' })
+    await this.notifyGoalAssignment({
+      goal,
+      module,
+      period: PERIOD,
+      totalTarget: TARGET_VALUE,
+      staffTargets,
+    })
+
+    return this.success({ message: 'Meta asignada al modulo con éxito.' })
+  }
+
+  private async getActiveModuleMembers(moduleId: number): Promise<Staff[]> {
+    const memberships = await this.staffModuleRepository.find({
+      select: ['STAFF_ID'],
+      where: {
+        MODULE_ID: moduleId,
+        STATE: 'A',
+      },
+    })
+
+    if (!memberships.length) {
+      return []
+    }
+
+    const memberIds = memberships.map((member) => member.STAFF_ID)
+
+    return this.staffRepositoryLocal.find({
+      where: {
+        STAFF_ID: In(memberIds),
+        STATE: 'A',
+      },
+      order: { STAFF_ID: 'ASC' },
+    })
+  }
+
+  private distributeTarget(total: number, size: number): number[] {
+    if (size <= 0) {
+      return []
+    }
+
+    const base = Math.floor(total / size)
+    const remainder = total % size
+
+    return Array.from({ length: size }, (_, index) => {
+      const extra = index < remainder ? 1 : 0
+      return base + extra
+    })
+  }
+
+  private formatNumber(value: number): string {
+    const numeric = Number.isFinite(value) ? Number(value) : 0
+    return numeric.toLocaleString('es-DO', { maximumFractionDigits: 0 })
+  }
+
+  private formatIsoWeekPeriod(period: number): string {
+    const raw = String(period ?? '').padStart(6, '0')
+    const year = raw.slice(0, 4)
+    const week = Number(raw.slice(4))
+    return `Semana ${week} - ${year}`
+  }
+
+  private async notifyGoalAssignment({
+    goal,
+    module,
+    period,
+    totalTarget,
+    staffTargets,
+  }: {
+    goal: Goal
+    module: Module
+    period: number
+    totalTarget: number
+    staffTargets: { staff: Staff; target: number }[]
+  }): Promise<void> {
+    if (!staffTargets.length) {
+      return
+    }
+
+    const supervisorStaff = module.SUPERVISOR?.STAFF
+    const supervisorName = supervisorStaff
+      ? `${supervisorStaff.NAME ?? ''} ${
+          supervisorStaff.LAST_NAME ?? ''
+        }`.trim()
+      : undefined
+    const supervisorEmail = supervisorStaff?.EMAIL ?? undefined
+    const periodLabel = this.formatIsoWeekPeriod(period)
+    const totalTargetFormatted = this.formatNumber(totalTarget)
+
+    await Promise.all(
+      staffTargets.map(({ staff, target }) => {
+        if (!staff?.EMAIL) {
+          return Promise.resolve()
+        }
+
+        const staffName = `${staff.NAME ?? ''} ${staff.LAST_NAME ?? ''}`.trim()
+        const individualTarget = Number.isFinite(target) ? target : 0
+        const individualTargetFormatted = this.formatNumber(individualTarget)
+
+        return publishEmailToQueue({
+          to: staff.EMAIL,
+          subject: `Nueva meta asignada: ${goal.DESCRIPTION}`,
+          templateName: 'goal-assignment',
+          text: `Hola ${staffName}, se ha definido la meta "${goal.DESCRIPTION}" para el módulo ${module.DESCRIPTION} durante ${periodLabel}. Tu objetivo asignado es ${individualTargetFormatted}.`,
+          record: {
+            staffName,
+            staffEmail: staff.EMAIL,
+            moduleName: module.DESCRIPTION,
+            moduleId: module.MODULE_ID,
+            goalId: goal.GOAL_ID,
+            goalDescription: goal.DESCRIPTION,
+            goalWeight: goal.WEIGHT,
+            period,
+            periodLabel,
+            totalTarget,
+            totalTargetFormatted,
+            individualTarget,
+            individualTargetFormatted,
+            supervisorName,
+            supervisorEmail,
+          },
+        })
+      })
+    )
   }
 
   @CatchServiceError()
@@ -145,44 +457,203 @@ export class GoalService extends BaseService {
     payload: PostProgressPayload,
     session: SessionInfo
   ): Promise<ApiResponse> {
-    const { GOAL_ID, SCOPE, PERIOD, ACTUAL_VALUE, STAFF_ID, MODULE_ID } =
-      payload
-
-    const goal = await this.goalRepository.findOne({ where: { GOAL_ID } })
-    if (!goal) throw new NotFoundError('Meta no encontrada.')
-
-    if (SCOPE === GoalScope.INDIVIDUAL) {
-      if (!STAFF_ID)
-        throw new NotFoundError(
-          'STAFF_ID es requerido para metas individuales.'
-        )
-      const staff = await this.staffRepositoryLocal.findOne({
-        where: { STAFF_ID },
-      })
-      if (!staff) throw new NotFoundError('Empleado no encontrado.')
-    } else {
-      if (!MODULE_ID)
-        throw new NotFoundError('MODULE_ID es requerido para metas de módulo.')
-      const module = await this.moduleRepository.findOne({
-        where: { MODULE_ID },
-      })
-      if (!module) throw new NotFoundError('Módulo no encontrado.')
-    }
-
-    const progress = this.goalProgressRepository.create({
+    const {
       GOAL_ID,
       SCOPE,
       PERIOD,
       ACTUAL_VALUE,
-      STAFF_ID: SCOPE === GoalScope.INDIVIDUAL ? (STAFF_ID as number) : null,
-      MODULE_ID: SCOPE === GoalScope.MODULE ? (MODULE_ID as number) : null,
-      CREATED_AT: new Date(),
-      CREATED_BY: session.userId,
-      STATE: 'A',
+      STAFF_ID,
+      MODULE_ID,
+      CONTRIBUTIONS = [],
+    } = payload
+
+    const goal = await this.goalRepository.findOne({ where: { GOAL_ID } })
+    if (!goal) throw new NotFoundError('Meta no encontrada.')
+
+    let goalModuleAssignment: GoalModule | null = null
+    let moduleIdForProgress: number | null = null
+
+    if (SCOPE === GoalScope.INDIVIDUAL) {
+      if (!STAFF_ID) {
+        throw new NotFoundError(
+          'STAFF_ID es requerido para metas individuales.'
+        )
+      }
+      const staff = await this.staffRepositoryLocal.findOne({
+        where: { STAFF_ID },
+      })
+      if (!staff) throw new NotFoundError('Empleado no encontrado.')
+
+      if (goal.SCOPE === GoalScope.MODULE || MODULE_ID !== undefined) {
+        const moduleAssignments = await this.goalModuleRepository.find({
+          where: {
+            GOAL_ID,
+            PERIOD,
+            STATE: 'A' as never,
+          },
+        })
+
+        if (!moduleAssignments.length && goal.SCOPE === GoalScope.MODULE) {
+          throw new NotFoundError(
+            'La meta no está asignada a ningún módulo en el período indicado.'
+          )
+        }
+
+        if (MODULE_ID !== undefined) {
+          goalModuleAssignment =
+            moduleAssignments.find((item) => item.MODULE_ID === MODULE_ID) ??
+            null
+        } else if (moduleAssignments.length === 1) {
+          goalModuleAssignment = moduleAssignments[0]
+        }
+
+        if (goal.SCOPE === GoalScope.MODULE && !goalModuleAssignment) {
+          throw new BadRequestError(
+            'Debe especificar MODULE_ID para registrar progreso individual cuando la meta está asignada a más de un módulo.'
+          )
+        }
+
+        moduleIdForProgress = goalModuleAssignment?.MODULE_ID ?? null
+      }
+    } else {
+      if (!MODULE_ID) {
+        throw new NotFoundError('MODULE_ID es requerido para metas de módulo.')
+      }
+      const module = await this.moduleRepository.findOne({
+        where: { MODULE_ID },
+      })
+      if (!module) throw new NotFoundError('Módulo no encontrado.')
+
+      if (goal.SCOPE !== GoalScope.MODULE) {
+        throw new BadRequestError(
+          'La meta debe ser de alcance módulo para registrar progreso de módulo.'
+        )
+      }
+
+      goalModuleAssignment = await this.goalModuleRepository.findOne({
+        where: {
+          GOAL_ID,
+          MODULE_ID,
+          PERIOD,
+          STATE: 'A' as never,
+        },
+      })
+
+      if (!goalModuleAssignment) {
+        throw new NotFoundError(
+          'La meta no está asignada al módulo indicado para el período especificado.'
+        )
+      }
+
+      moduleIdForProgress = MODULE_ID
+    }
+
+    let sanitizedContributions: ProgressContributionPayload[] = []
+    if (SCOPE === GoalScope.MODULE) {
+      sanitizedContributions = CONTRIBUTIONS.map((item) => ({
+        STAFF_ID: Number(item?.STAFF_ID),
+        ACTUAL_VALUE: Number(item?.ACTUAL_VALUE ?? 0),
+      })).filter(
+        (item) =>
+          Number.isInteger(item.STAFF_ID) &&
+          Number.isInteger(item.ACTUAL_VALUE) &&
+          item.ACTUAL_VALUE >= 0
+      )
+
+      if (sanitizedContributions.length) {
+        if (!moduleIdForProgress) {
+          throw new BadRequestError(
+            'No se pudo determinar el módulo para validar los aportes.'
+          )
+        }
+
+        const activeMembers = await this.getActiveModuleMembers(
+          moduleIdForProgress
+        )
+        const validStaffIds = new Set(
+          activeMembers.map((staff) => staff.STAFF_ID)
+        )
+        const invalidStaff = sanitizedContributions
+          .map((item) => item.STAFF_ID)
+          .filter((staffId) => !validStaffIds.has(staffId))
+
+        if (invalidStaff.length) {
+          throw new BadRequestError(
+            'Los aportes contienen empleados que no pertenecen al módulo o no están activos.'
+          )
+        }
+
+        const contributionsSum = sanitizedContributions.reduce(
+          (acc, item) => acc + item.ACTUAL_VALUE,
+          0
+        )
+
+        if (contributionsSum !== ACTUAL_VALUE) {
+          throw new BadRequestError(
+            'La suma de los aportes debe coincidir con el valor total reportado.'
+          )
+        }
+      }
+    }
+
+    const now = new Date()
+
+    await this.dataSource.transaction(async (manager) => {
+      const progressRepository = manager.getRepository(GoalProgress)
+
+      const baseProgress = progressRepository.create({
+        GOAL_ID,
+        MODULE_ID: moduleIdForProgress,
+        GOAL_MODULE_ID: goalModuleAssignment?.GOAL_MODULE_ID ?? null,
+        SCOPE,
+        PERIOD,
+        ACTUAL_VALUE,
+        STAFF_ID: SCOPE === GoalScope.INDIVIDUAL ? (STAFF_ID as number) : null,
+        CREATED_AT: now,
+        CREATED_BY: session.userId,
+        STATE: 'A',
+      } as never)
+
+      await progressRepository.save(baseProgress)
+
+      if (SCOPE === GoalScope.MODULE && sanitizedContributions.length) {
+        const individualRecords = sanitizedContributions.map((item) =>
+          progressRepository.create({
+            GOAL_ID,
+            MODULE_ID: moduleIdForProgress,
+            GOAL_MODULE_ID: goalModuleAssignment?.GOAL_MODULE_ID ?? null,
+            SCOPE: GoalScope.INDIVIDUAL,
+            PERIOD,
+            STAFF_ID: item.STAFF_ID,
+            ACTUAL_VALUE: item.ACTUAL_VALUE,
+            CREATED_AT: now,
+            CREATED_BY: session.userId,
+            STATE: 'A',
+          } as never)
+        )
+
+        await progressRepository.save(individualRecords as never)
+      }
     })
 
-    await this.goalProgressRepository.save(progress)
     return this.success({ message: 'Progreso registrado con éxito.' })
+  }
+
+  @CatchServiceError()
+  async update(payload: Goal, session: SessionInfo) {
+    const { GOAL_ID, ...restProps } = payload
+
+    const [goal] = await this.goalRepository.find({ where: { GOAL_ID } })
+    if (!goal) {
+      throw new NotFoundError(`Meta con id '${GOAL_ID}' no fue encontrado.`)
+    }
+
+    this.goalRepository.update(
+      { GOAL_ID },
+      { ...restProps, UPDATED_AT: new Date(), UPDATED_BY: session.userId }
+    )
+
+    return this.success({ message: 'Meta actualizada con éxito.' })
   }
 
   @CatchServiceError()
@@ -229,8 +700,8 @@ export class GoalService extends BaseService {
       }
     }
     for (const p of progress) {
-      if (!byGoal[p.GOAL_ID]) continue
-      byGoal[p.GOAL_ID].actual += Number(p.ACTUAL_VALUE || 0)
+      if (!byGoal[p.GOAL_MODULE_ID]) continue
+      byGoal[p.GOAL_MODULE_ID].actual += Number(p.ACTUAL_VALUE || 0)
     }
 
     const details = Object.entries(byGoal).map(([goalId, v]) => {
@@ -256,6 +727,8 @@ export class GoalService extends BaseService {
     })
   }
 
+  // import { In } from 'typeorm'
+
   @CatchServiceError()
   async getModuleSummary(
     payload: ModuleSummaryPayload,
@@ -263,70 +736,160 @@ export class GoalService extends BaseService {
   ): Promise<ApiResponse> {
     const { MODULE_ID, PERIOD } = payload
 
-    // Metas de módulo (scope = 'module')
+    // 1) Trae asignaciones activas del período para el módulo
+    const goalModules = await this.goalModuleRepository.find({
+      where: { MODULE_ID, PERIOD, STATE: 'A' as never },
+    })
+    const moduleMap = new Map(
+      goalModules.map((module) => [module.GOAL_MODULE_ID, module])
+    )
+    const goalModuleIds = goalModules.map((module) => module.GOAL_MODULE_ID)
+
+    const progress =
+      goalModuleIds.length > 0
+        ? await this.goalProgressRepository.find({
+            where: {
+              SCOPE: GoalScope.MODULE,
+              GOAL_MODULE_ID: In(goalModuleIds),
+              PERIOD,
+              STATE: 'A' as never,
+            },
+          })
+        : []
+
+    const dailyTargets =
+      goalModuleIds.length > 0
+        ? await this.goalDailyTargetRepository.find({
+            where: {
+              GOAL_MODULE_ID: In(goalModuleIds),
+              PERIOD,
+              STATE: 'A' as never,
+            },
+            order: { TARGET_DATE: 'ASC' as never },
+          })
+        : []
+
+    // 2) IDs de metas activas en el período
+    const activeGoalIds = Array.from(
+      new Set<number>([
+        ...goalModules.map((module) => module.GOAL_ID),
+        ...progress.map((item) => item.GOAL_ID),
+      ])
+    )
+    // 👉 Si quieres SOLO metas con asignación del período:
+    // const activeGoalIds = Array.from(new Set(assignments.map(a => a.GOAL_ID)))
+
+    if (activeGoalIds.length === 0) return this.noContent()
+
+    // 3) Trae SOLO las metas activas (WEIGHT está en GOAL)
     const goals = await this.goalRepository.find({
-      where: { SCOPE: 'module' as never },
+      where: { SCOPE: GoalScope.MODULE, GOAL_ID: In(activeGoalIds) },
     })
     if (!goals.length) return this.noContent()
 
-    const goalIds = goals.map((g) => g.GOAL_ID)
-    const assignments = await this.goalModuleRepository.find({
-      where: { MODULE_ID, PERIOD, STATE: 'A' as never },
-    })
+    const dailyTargetsByGoal = dailyTargets.reduce((acc, target) => {
+      const goalId = moduleMap.get(target.GOAL_MODULE_ID)?.GOAL_ID
+      if (!goalId) return acc
+      ;(acc[goalId] ||= []).push({
+        TARGET_DATE: target.TARGET_DATE,
+        TARGET_VALUE: Number(target.TARGET_VALUE ?? 0),
+      })
+      return acc
+    }, {} as Record<number, GoalDailyTargetPayload[]>)
 
-    const progress = await this.goalProgressRepository.find({
-      where: {
-        SCOPE: 'module' as never,
-        MODULE_ID,
-        PERIOD,
-        STATE: 'A' as never,
-      },
-    })
-
+    // 4) Inicializa acumuladores por meta
     const byGoal: Record<
       number,
-      { target: number; weight: number; actual: number }
+      {
+        target: number
+        weight: number
+        actual: number
+        description: string
+        state: string
+      }
     > = {}
     for (const g of goals) {
       byGoal[g.GOAL_ID] = {
         target: 0,
-        weight: (g.WEIGHT as unknown as number) || 0,
+        weight: Number(g.WEIGHT ?? 0), // ✅ WEIGHT viene de GOAL
         actual: 0,
+        description: g.DESCRIPTION,
+        state: g.STATE,
       }
     }
-    for (const a of assignments) {
-      if (!byGoal[a.GOAL_ID]) continue
-      byGoal[a.GOAL_ID].target += Number(a.TARGET_VALUE || 0)
-    }
-    for (const p of progress) {
-      if (!byGoal[p.GOAL_ID]) continue
-      byGoal[p.GOAL_ID].actual += Number(p.ACTUAL_VALUE || 0)
+
+    // 5) Suma target por asignaciones del período
+    for (const module of goalModules) {
+      const entry = byGoal[module.GOAL_ID]
+      if (!entry) continue
+      entry.target += Number(module.TARGET_VALUE ?? 0)
     }
 
-    const details = Object.entries(byGoal)
-      .filter(([goalId]) => goalIds.includes(Number(goalId)))
-      .map(([goalId, v]) => {
-        const raw = v.target > 0 ? v.actual / v.target : 0
-        const capped = Math.min(raw, 1) // módulo cap 100% por meta
-        const compliance = capped * v.weight
-        const lastUpdate = progress
-          .filter((p) => p.GOAL_ID === Number(goalId))
-          .reduce((acc: Date | null, cur) => {
-            const d = (cur.UPDATED_AT || cur.CREATED_AT) as unknown as Date
-            return !acc || (d && d > acc) ? d : acc
-          }, null)
+    // 6) Suma actual por progreso del período
+    for (const p of progress) {
+      const entry = byGoal[p.GOAL_ID]
+      if (!entry) continue
+      entry.actual += Number(p.ACTUAL_VALUE ?? 0)
+    }
+
+    // 7) Logs de progreso por meta
+    const progressByGoal = progress.reduce(
+      (acc, item) => {
+        const key = item.GOAL_ID
+        ;(acc[key] ||= []).push({
+          GOAL_PROGRESS_ID: item.GOAL_PROGRESS_ID,
+          ACTUAL_VALUE: Number(item.ACTUAL_VALUE ?? 0),
+          CREATED_AT: item.CREATED_AT,
+          UPDATED_AT: item.UPDATED_AT,
+        })
+        return acc
+      },
+      {} as Record<
+        number,
+        {
+          GOAL_PROGRESS_ID: number
+          ACTUAL_VALUE: number
+          CREATED_AT: Date | null
+          UPDATED_AT: Date | null
+        }[]
+      >
+    )
+
+    // 8) Detalles SOLO para metas activas del período
+    const details = activeGoalIds
+      .filter((id) => byGoal[id]) // por si alguna quedó fuera
+      .map((id) => {
+        const entry = byGoal[id]
+        const raw = entry.target > 0 ? entry.actual / entry.target : 0
+        const capped = Math.min(raw, 1) // cap 100% por meta
+        const compliance = capped * entry.weight
+
+        const logs = [...(progressByGoal[id] ?? [])].sort((a, b) => {
+          const ta = (a.CREATED_AT ?? a.UPDATED_AT)?.valueOf() ?? 0
+          const tb = (b.CREATED_AT ?? b.UPDATED_AT)?.valueOf() ?? 0
+          return ta - tb
+        })
+        const lastUpdate = logs.reduce<Date | null>((acc, cur) => {
+          const d = (cur.UPDATED_AT || cur.CREATED_AT) as unknown as Date
+          return !acc || (d && d > acc) ? d : acc
+        }, null)
+
         return {
-          GOAL_ID: Number(goalId),
-          TARGET_VALUE: v.target,
-          ACTUAL_VALUE: v.actual,
-          WEIGHT: v.weight,
+          GOAL_ID: id,
+          DESCRIPTION: entry.description,
+          STATE: entry.state,
+          TARGET_VALUE: entry.target,
+          ACTUAL_VALUE: entry.actual,
+          WEIGHT: entry.weight,
           COMPLIANCE: compliance,
           UPDATED_AT: lastUpdate || null,
+          PROGRESS_LOGS: logs,
+          DAILY_TARGETS: dailyTargetsByGoal[id] ?? [],
         }
       })
 
     const sum = details.reduce((acc, d) => acc + d.COMPLIANCE, 0)
-    const TOTAL_COMPLIANCE = Math.min(sum, 100) // cap total en 100% para módulo
+    const TOTAL_COMPLIANCE = Math.min(sum, 100) // cap total 100%
 
     return this.success({
       data: { MODULE_ID, PERIOD, TOTAL_COMPLIANCE, DETAILS: details },
@@ -334,9 +897,25 @@ export class GoalService extends BaseService {
   }
 
   @CatchServiceError()
-  async getGoalsByModule(moduleId: number): Promise<ApiResponse> {
+  async getGoalsByModule(
+    moduleId: number,
+    period: number
+  ): Promise<ApiResponse> {
+    const goalModule = await this.goalModuleRepository.find({
+      select: ['GOAL_ID'],
+      where: {
+        MODULE_ID: moduleId,
+        STATE: 'A',
+        PERIOD: period,
+      },
+    })
+
     const goals = await this.goalRepository.find({
-      where: { SCOPE: 'module' as never },
+      where: {
+        SCOPE: 'module' as never,
+        STATE: 'A',
+        GOAL_ID: In(goalModule.map((item) => item.GOAL_ID)),
+      },
       order: { GOAL_ID: 'DESC' as never },
     })
 
@@ -353,83 +932,112 @@ export class GoalService extends BaseService {
     const { whereClause, values } = whereClauseBuilder(conditions)
 
     const statement = `
-      WITH TARGET AS (
+      WITH MODULES AS (
         SELECT
-          "GOAL_ID",
-          "MODULE_ID",
-          "PERIOD",
-          SUM("TARGET_VALUE") AS "TARGET_VALUE"
-        FROM public."GOAL_X_MODULE"
-        WHERE "STATE" = 'A'
-        GROUP BY "GOAL_ID", "MODULE_ID", "PERIOD"
+          gm."GOAL_MODULE_ID",
+          gm."GOAL_ID",
+          gm."MODULE_ID",
+          gm."PERIOD",
+          g."DESCRIPTION",
+          g."WEIGHT",
+          g."STATE"
+        FROM public."GOAL_X_MODULE" gm
+        INNER JOIN public."GOAL" g
+          ON g."GOAL_ID" = gm."GOAL_ID"
+        WHERE gm."STATE" = 'A'
+          AND g."SCOPE" = 'module'
+      ),
+      TARGET AS (
+        SELECT
+          gdt."GOAL_MODULE_ID",
+          gdt."PERIOD",
+          gdt."TARGET_DATE",
+          SUM(gdt."TARGET_VALUE") AS "TARGET_VALUE"
+        FROM public."GOAL_DAILY_TARGET" gdt
+        WHERE gdt."STATE" = 'A'
+        GROUP BY gdt."GOAL_MODULE_ID", gdt."PERIOD", gdt."TARGET_DATE"
       ),
       PROGRESS AS (
         SELECT
-          "GOAL_ID",
-          "MODULE_ID",
-          "PERIOD",
-          SUM("ACTUAL_VALUE") AS "ACTUAL_VALUE",
-          MAX(COALESCE("UPDATED_AT", "CREATED_AT")) AS "LAST_UPDATE"
-        FROM public."GOAL_PROGRESS"
-        WHERE "SCOPE" = 'module' AND "STATE" = 'A'
-        GROUP BY "GOAL_ID", "MODULE_ID", "PERIOD"
-      ),
-      KEYS AS (
-        SELECT DISTINCT "GOAL_ID", "MODULE_ID", "PERIOD" FROM TARGET
-        UNION
-        SELECT DISTINCT "GOAL_ID", "MODULE_ID", "PERIOD" FROM PROGRESS
+          gp."GOAL_MODULE_ID",
+          gp."PERIOD",
+          DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "TARGET_DATE",
+          SUM(gp."ACTUAL_VALUE") AS "ACTUAL_VALUE",
+          MAX(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "LAST_UPDATE"
+        FROM public."GOAL_PROGRESS" gp
+        WHERE gp."STATE" = 'A'
+          AND gp."SCOPE" = 'module'
+          AND gp."GOAL_MODULE_ID" IS NOT NULL
+        GROUP BY gp."GOAL_MODULE_ID",
+                 gp."PERIOD",
+                 DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT"))
       ),
       DATA AS (
         SELECT
-          k."GOAL_ID",
-          k."MODULE_ID",
-          k."PERIOD",
+          m."GOAL_MODULE_ID",
+          m."GOAL_ID",
+          m."DESCRIPTION",
+          m."WEIGHT",
+          m."STATE",
+          m."MODULE_ID",
+          m."PERIOD",
+          t."TARGET_DATE",
           t."TARGET_VALUE",
-          p."ACTUAL_VALUE",
+          COALESCE(p."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
           p."LAST_UPDATE"
-        FROM KEYS k
-        LEFT JOIN TARGET t
-          ON t."GOAL_ID" = k."GOAL_ID"
-         AND t."MODULE_ID" IS NOT DISTINCT FROM k."MODULE_ID"
-         AND t."PERIOD" IS NOT DISTINCT FROM k."PERIOD"
+        FROM MODULES m
+        JOIN TARGET t
+          ON t."GOAL_MODULE_ID" = m."GOAL_MODULE_ID"
+         AND t."PERIOD" = m."PERIOD"
         LEFT JOIN PROGRESS p
-          ON p."GOAL_ID" = k."GOAL_ID"
-         AND p."MODULE_ID" IS NOT DISTINCT FROM k."MODULE_ID"
-         AND p."PERIOD" IS NOT DISTINCT FROM k."PERIOD"
+          ON p."GOAL_MODULE_ID" = m."GOAL_MODULE_ID"
+         AND p."PERIOD" = m."PERIOD"
+         AND p."TARGET_DATE" = t."TARGET_DATE"
       )
       SELECT
-        *
+        sub.*,
+        CASE
+          WHEN sub."TARGET_VALUE_ACC" = 0 THEN NULL
+          ELSE ROUND(
+            LEAST(
+              COALESCE(sub."ACTUAL_VALUE_ACC", 0)::decimal
+              / NULLIF(sub."TARGET_VALUE_ACC", 0)
+              * 100,
+              100
+            ),
+            2
+          )
+        END AS "COMPLIANCE"
       FROM (
         SELECT
-          g."GOAL_ID",
-          g."DESCRIPTION",
-          g."WEIGHT",
-          g."STATE",
+          d."GOAL_MODULE_ID",
+          d."GOAL_ID",
+          d."DESCRIPTION",
+          d."WEIGHT",
+          d."STATE",
           d."MODULE_ID",
           d."PERIOD",
-          COALESCE(d."TARGET_VALUE", 0) AS "TARGET_VALUE",
-          COALESCE(d."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
-          CASE
-            WHEN d."TARGET_VALUE" IS NULL THEN NULL
-            WHEN d."TARGET_VALUE" = 0 THEN 0
-            ELSE ROUND(
-              LEAST(
-                COALESCE(d."ACTUAL_VALUE", 0)::decimal
-                / NULLIF(d."TARGET_VALUE", 0)
-                * 100,
-                100
-              ),
-              2
-            )
-          END AS "COMPLIANCE",
+          d."TARGET_DATE",
+          d."TARGET_VALUE",
+          d."ACTUAL_VALUE",
+          SUM(d."TARGET_VALUE") OVER w AS "TARGET_VALUE_ACC",
+          SUM(d."ACTUAL_VALUE") OVER w AS "ACTUAL_VALUE_ACC",
           d."LAST_UPDATE" AS "UPDATED_AT",
-          g."DESCRIPTION" || ' ' || g."GOAL_ID" AS "FILTER"
-        FROM public."GOAL" g
-        LEFT JOIN DATA d ON d."GOAL_ID" = g."GOAL_ID"
-        WHERE g."SCOPE" = 'module'
-      ) AS SUBQUERY
+          d."DESCRIPTION" || ' ' || d."GOAL_ID" || ' ' ||
+            to_char(d."TARGET_DATE", 'YYYY-MM-DD') AS "FILTER"
+        FROM DATA d
+        WINDOW w AS (
+          PARTITION BY d."GOAL_MODULE_ID", d."PERIOD"
+          ORDER BY d."TARGET_DATE"
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )
+      ) AS sub
       ${whereClause}
-      ORDER BY "GOAL_ID" DESC, "MODULE_ID" DESC NULLS LAST, "PERIOD" DESC NULLS LAST
+      ORDER BY
+        "GOAL_ID" DESC,
+        "MODULE_ID" DESC NULLS LAST,
+        "PERIOD" DESC NULLS LAST,
+        "TARGET_DATE" ASC
     `
 
     const [data = [], metadata] = await paginatedQuery({
@@ -464,7 +1072,8 @@ export class GoalService extends BaseService {
             g."END_DATE",
             g."STATE",
             g."WEIGHT",
-            g."SCOPE",
+            g."TARGET_VALUE",
+            g."CREATED_AT",
             g."GOAL_ID" || ' ' || g."DESCRIPTION" || ' ' || g."SCOPE" AS "FILTER"
           FROM 
             public."GOAL" g

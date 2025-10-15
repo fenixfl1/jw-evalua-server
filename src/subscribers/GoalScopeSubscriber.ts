@@ -41,9 +41,9 @@ export class GoalScopeSubscriber implements EntitySubscriberInterface {
       const goal = await manager
         .getRepository(Goal)
         .findOne({ where: { GOAL_ID: entity.GOAL_ID } })
-      if (goal && goal.SCOPE !== GoalScope.INDIVIDUAL) {
-        throw new Error('GOAL_X_STAFF requires goal with SCOPE = individual')
-      }
+      // if (goal && goal.SCOPE !== GoalScope.INDIVIDUAL) {
+      //   throw new Error('GOAL_X_STAFF requires goal with SCOPE = individual')
+      // }
     }
 
     // GoalModule must reference module goals

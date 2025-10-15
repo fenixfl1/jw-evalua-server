@@ -2,8 +2,15 @@ import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm'
 import { BaseEntity } from './BaseEntity'
 import { GoalStaff } from './GoalStaff'
 import { GoalModule } from './GoalModule'
-import { GoalProgress } from './GoalProgress'
 import { GoalScope } from './goal-scope.enum'
+
+const numericTransformer = {
+  to: (value?: number | null) => value,
+  from: (value: string | number | null | undefined) => {
+    if (value === null || value === undefined) return null
+    return typeof value === 'string' ? Number(value) : value
+  },
+}
 
 @Entity('GOAL')
 export class Goal extends BaseEntity {
@@ -13,11 +20,19 @@ export class Goal extends BaseEntity {
   @Column({ type: 'varchar' })
   DESCRIPTION: string
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'date' })
   START_DATE: Date
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'date' })
   END_DATE: Date
+
+  @Column({
+    type: 'numeric',
+    nullable: false,
+    default: 0,
+    transformer: numericTransformer,
+  })
+  TARGET_VALUE: number
 
   @Column({ type: 'integer' })
   WEIGHT: number
@@ -30,7 +45,4 @@ export class Goal extends BaseEntity {
 
   @OneToMany(() => GoalModule, (goalModule) => goalModule.GOAL)
   MODULES: GoalModule[]
-
-  @OneToMany(() => GoalProgress, (progress) => progress.GOAL)
-  PROGRESS: GoalProgress[]
 }

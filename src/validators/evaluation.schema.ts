@@ -33,3 +33,9 @@ export const updateEvaluationSchema = Joi.object({
     })
   ).optional(),
 }).min(1)
+
+export const evaluationAvailabilityQuerySchema = Joi.object({
+  staffId: Joi.number().integer().required(),
+  period: Joi.number().integer().required(),
+  excludeEvaluationId: Joi.number().integer(),
+})

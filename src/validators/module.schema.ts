@@ -20,3 +20,11 @@ export const createOrUpdateMembersSchema = Joi.object({
     STATE: Joi.string().valid('A', 'I').required(),
   }),
 })
+
+export const getModuleMembersSchema = Joi.object({
+  condition: Joi.object({
+    MODULE_ID: Joi.number().required(),
+    STATE: Joi.string().valid('A', 'I').optional(),
+    STAFF_ID: Joi.number().optional(),
+  }),
+})

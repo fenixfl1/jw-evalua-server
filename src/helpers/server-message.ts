@@ -32,5 +32,5 @@ export function serverMessage(time: string) {
     borderColor: 'green',
   }
 
-  console.log(boxen(message, boxenOptions))
+  console.info(boxen(message, boxenOptions))
 }

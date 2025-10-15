@@ -7,6 +7,8 @@ export const PATH_GET_USER = '/user/:username'
 export const PATH_CHANGE_PASSWORD = '/user/change_password'
 export const PATH_GET_USER_PAGINAtION = '/user/pagination'
 export const PATH_LOGIN = '/login'
+export const PATH_REQUEST_RESET_PASSWORD = '/request_password_reset'
+export const PATH_RESET_PASSWORD = '/reset_password'
 export const PATH_CREATE_MENU_OPTION = '/menu_options'
 export const PATH_GET_MENU_OPTION_WITH_PERMISSIONS =
   '/menu_options/get_with_permission'
@@ -18,6 +20,7 @@ export const PATH_GET_PERMISSIONS_PAGINATION = '/permissions/pagination'
 export const PATH_CREATE_UPDATE_MODULE = '/module'
 export const PATH_GET_PAGINATED_MODULES = '/module/pagination'
 export const PATH_CREATE_OR_UPDATE_MODULE_MEMBERS = '/module/members'
+export const PATH_GET_MODULE_MEMBERS = '/module/get_members'
 // Goals
 export const PATH_CREATE_GOAL = '/goal'
 export const PATH_GET_GOAL_PAGINATION = '/goal/pagination'
@@ -30,7 +33,7 @@ export const PATH_GET_GOAL_SUMMARY_MODULE =
   '/goal/summary/module/:moduleId/:periodId'
 export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION =
   '/goal/summary/module/pagination'
-export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId'
+export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId/:period'
 
 // Competencies
 export const PATH_GET_COMPETENCIES = '/competency'
@@ -40,6 +43,7 @@ export const PATH_CREATE_EVALUATION = '/evaluation'
 export const PATH_UPDATE_EVALUATION = '/evaluation/:evaluationId'
 export const PATH_GET_EVALUATION = '/evaluation/:evaluationId'
 export const PATH_GET_EVALUATION_PAGINATION = '/evaluation/pagination'
+export const PATH_CHECK_EVALUATION_AVAILABILITY = '/evaluation/availability'
 
 // Dashboard
 export const PATH_GET_DASHBOARD_SUMMARY = '/dashboard/summary'

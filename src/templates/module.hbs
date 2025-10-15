@@ -1,0 +1,42 @@
+<html lang='es'>
+  <head>
+    <meta charset='utf-8' />
+    <title>Asignacion a modulo</title>
+    <style>
+      body { font-family: Arial, sans-serif; color: #222222; } .container {
+      max-width: 600px; margin: 0 auto; padding: 16px; } .highlight {
+      font-weight: bold; } .footer { background-color: #f0f0f0; padding: 15px;
+      text-align: center; font-size: 14px; color: #888; }
+    </style>
+  </head>
+  <body>
+    <div class='container'>
+      <p>Hola {{staffname}},</p>
+      <p>
+        Has sido asignado al modulo
+        <span class='highlight'>{{modulename}}</span>.
+      </p>
+      <p>
+        <span class='highlight'>Supervisor:</span>
+        {{supervisorname}}
+        {{#if supervisoremail}}
+          (<a href='mailto:{{supervisoremail}}'>{{supervisoremail}}</a>)
+        {{/if}}
+      </p>
+      <p>Identificador del modulo: {{moduleid}}</p>
+      <p>
+        Si tienes preguntas, contacta con tu supervisor o con el area de
+        recursos humanos.
+      </p>
+      <p>Saludos,<br />Equipo de Evaluaciones</p>
+
+      <div class='footer'>
+        Este mensaje fue generado automáticamente. No respondas a este correo.
+        <br />
+        ©
+        {{year}}
+        {{business.name}}. Todos los derechos reservados.
+      </div>
+    </div>
+  </body>
+</html>

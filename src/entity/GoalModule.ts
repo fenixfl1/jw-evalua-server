@@ -1,7 +1,16 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm'
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm'
 import { BaseEntity } from './BaseEntity'
 import { Goal } from './Goal'
 import { Module } from './Module'
+import { GoalDailyTarget } from './GoalDailyTarget'
+import { GoalProgress } from './GoalProgress'
 
 const numericTransformer = {
   to: (value?: number | null) => value,
@@ -37,4 +46,10 @@ export class GoalModule extends BaseEntity {
   // Target units for the module in the period
   @Column({ type: 'numeric', nullable: true, transformer: numericTransformer })
   TARGET_VALUE: number
+
+  @OneToMany(() => GoalProgress, (progress) => progress.GOAL_MODULE)
+  PROGRESS: GoalProgress[]
+
+  @OneToMany(() => GoalDailyTarget, (dailyTarget) => dailyTarget.GOAL_MODULE)
+  DAILY_TARGETS: GoalDailyTarget[]
 }

@@ -1,4 +1,4 @@
-import { In, Repository } from 'typeorm'
+import { In, Not, Repository } from 'typeorm'
 import { BaseService, CatchServiceError } from './base.service'
 import { Evaluation } from '@src/entity/Evaluation'
 import { EvaluationDetail } from '@src/entity/EvaluationDetail'
@@ -15,6 +15,8 @@ import {
 import { NotFoundError } from '@src/errors/http.error'
 import { paginatedQuery } from '@src/helpers/query-utils'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
+import { HTTP_STATUS_CONFLICT } from '@src/constants/status-codes'
+import { publishEmailToQueue } from './email/email-producer.service'
 
 interface EvaluationDetailInput {
   COMPETENCY_ID: number
@@ -50,6 +52,14 @@ interface UpdateEvaluationPayload {
   STATE?: 'A' | 'I'
 }
 
+interface EvaluationAvailabilityResult {
+  available: boolean
+  evaluation: Pick<
+    Evaluation,
+    'EVALUATION_ID' | 'MODULE_ID' | 'STAFF_ID' | 'PERIOD'
+  > | null
+}
+
 export class EvaluationService extends BaseService {
   private evaluationRepository: Repository<Evaluation>
   private evaluationDetailRepository: Repository<EvaluationDetail>
@@ -81,6 +91,11 @@ export class EvaluationService extends BaseService {
 
     await this.ensureModuleExists(MODULE_ID)
     const evaluatedStaff = await this.ensureStaffExists(STAFF_ID)
+
+    await this.assertEvaluationAvailability({
+      staffId: evaluatedStaff.STAFF_ID,
+      period: PERIOD,
+    })
 
     const competencyIds = [
       ...new Set(DETAILS.map((detail) => detail.COMPETENCY_ID)),
@@ -140,9 +155,64 @@ export class EvaluationService extends BaseService {
     )
 
     const data = await this.getEvaluationById(savedEvaluation.EVALUATION_ID)
+
+    if (data) {
+      await this.notifyEvaluationCompleted(data)
+    }
+
     return this.success({
       message: 'Evaluación creada con éxito.',
       data,
+    })
+  }
+
+  private async notifyEvaluationCompleted(
+    evaluation: Evaluation
+  ): Promise<void> {
+    const staff =
+      evaluation.STAFF ?? (await this.ensureStaffExists(evaluation.STAFF_ID))
+
+    if (!staff?.EMAIL) {
+      return
+    }
+
+    const evaluator = evaluation.EVALUATOR ?? null
+    const module = evaluation.MODULE ?? null
+
+    const overallScore =
+      evaluation.OVERALL_SCORE !== null &&
+      evaluation.OVERALL_SCORE !== undefined
+        ? evaluation.OVERALL_SCORE.toString()
+        : 'No asignado'
+
+    const detailRecords = (evaluation.DETAILS ?? []).map((detail) => ({
+      competencyName: detail.COMPETENCY?.NAME ?? '',
+      score:
+        detail.SCORE !== null && detail.SCORE !== undefined
+          ? detail.SCORE.toString()
+          : 'N/A',
+      weight:
+        detail.WEIGHT !== null && detail.WEIGHT !== undefined
+          ? detail.WEIGHT.toString()
+          : 'N/A',
+      comment: detail.COMMENT ?? '',
+    }))
+    await publishEmailToQueue({
+      to: staff.EMAIL,
+      subject: 'Nueva evaluación registrada',
+      templateName: 'evaluation',
+      text: `Hola ${staff.NAME}, se registro una evaluación del periodo ${evaluation.PERIOD}.`,
+      record: {
+        staffName: `${staff.NAME} ${staff.LAST_NAME}`,
+        moduleName: module?.DESCRIPTION ?? 'No asignado',
+        period: evaluation.PERIOD,
+        overallScore,
+        evaluatorName: evaluator
+          ? `${evaluator.NAME} ${evaluator.LAST_NAME}`
+          : 'No asignado',
+        comments: evaluation.COMMENTS ?? '',
+        details: detailRecords,
+      },
     })
   }
 
@@ -173,6 +243,14 @@ export class EvaluationService extends BaseService {
     }
 
     const { DETAILS: detailsPayload = [], ...evaluationData } = payload
+    const targetPeriod = evaluationData.PERIOD ?? evaluation.PERIOD
+    const targetStaffId = evaluationData.STAFF_ID ?? evaluation.STAFF_ID
+
+    await this.assertEvaluationAvailability({
+      staffId: targetStaffId,
+      period: targetPeriod,
+      excludeEvaluationId: evaluation.EVALUATION_ID,
+    })
 
     if (detailsPayload.length) {
       const competencyIds = [
@@ -187,9 +265,6 @@ export class EvaluationService extends BaseService {
           throw new NotFoundError('Una o mas competencias no existen.')
         }
       }
-
-      const targetPeriod = evaluationData.PERIOD ?? evaluation.PERIOD
-      const targetStaffId = evaluationData.STAFF_ID ?? evaluation.STAFF_ID
 
       await this.validateGoalAssignments({
         details: detailsPayload,
@@ -278,7 +353,7 @@ export class EvaluationService extends BaseService {
         })
 
         if (!existing) {
-          throw new NotFoundError('Detalle de evaluacion no encontrado.')
+          throw new NotFoundError('Detalle de evaluación no encontrado.')
         }
 
         detailRepo.merge(existing, {
@@ -296,8 +371,41 @@ export class EvaluationService extends BaseService {
 
     const data = await this.getEvaluationById(evaluationId)
     return this.success({
-      message: 'Evaluación actualizada con exito.',
+      message: 'Evaluación actualizada con éxito.',
       data,
+    })
+  }
+
+  @CatchServiceError()
+  async checkAvailability({
+    staffId,
+    period,
+    excludeEvaluationId,
+  }: {
+    staffId: number
+    period: number
+    excludeEvaluationId?: number
+  }): Promise<ApiResponse<EvaluationAvailabilityResult>> {
+    await this.ensureStaffExists(staffId)
+
+    const existing = await this.findActiveEvaluationByStaffAndPeriod({
+      staffId,
+      period,
+      excludeEvaluationId,
+    })
+
+    return this.success({
+      data: {
+        available: !existing,
+        evaluation: existing
+          ? {
+              EVALUATION_ID: existing.EVALUATION_ID,
+              MODULE_ID: existing.MODULE_ID,
+              STAFF_ID: existing.STAFF_ID,
+              PERIOD: existing.PERIOD,
+            }
+          : null,
+      },
     })
   }
 
@@ -361,6 +469,58 @@ export class EvaluationService extends BaseService {
     return this.success({ data, metadata })
   }
 
+  private async assertEvaluationAvailability({
+    staffId,
+    period,
+    excludeEvaluationId,
+  }: {
+    staffId: number
+    period: number
+    excludeEvaluationId?: number
+  }): Promise<void> {
+    const existing = await this.findActiveEvaluationByStaffAndPeriod({
+      staffId,
+      period,
+      excludeEvaluationId,
+    })
+
+    if (existing) {
+      this.fail(
+        'El colaborador ya cuenta con una evaluación registrada para el periodo seleccionado.',
+        HTTP_STATUS_CONFLICT
+      )
+    }
+  }
+
+  private async findActiveEvaluationByStaffAndPeriod({
+    staffId,
+    period,
+    excludeEvaluationId,
+  }: {
+    staffId: number
+    period: number
+    excludeEvaluationId?: number
+  }): Promise<Pick<
+    Evaluation,
+    'EVALUATION_ID' | 'MODULE_ID' | 'STAFF_ID' | 'PERIOD'
+  > | null> {
+    try {
+      return this.evaluationRepository.findOne({
+        select: ['EVALUATION_ID', 'MODULE_ID', 'STAFF_ID', 'PERIOD'],
+        where: {
+          STAFF_ID: staffId,
+          PERIOD: period,
+          STATE: 'A',
+          ...(excludeEvaluationId
+            ? { EVALUATION_ID: Not(excludeEvaluationId) }
+            : {}),
+        },
+      })
+    } catch (error) {
+      throw error
+    }
+  }
+
   private async getEvaluationById(
     evaluationId: number
   ): Promise<Evaluation | null> {
@@ -395,13 +555,17 @@ export class EvaluationService extends BaseService {
   }
 
   private async ensureStaffExists(staffId: number): Promise<Staff> {
-    const staff = await this.staffRepositoryLocal.findOne({
-      where: { STAFF_ID: staffId },
-    })
-    if (!staff) {
-      throw new NotFoundError('Colaborador no encontrado.')
+    try {
+      const staff = await this.staffRepositoryLocal.findOne({
+        where: { STAFF_ID: staffId },
+      })
+      if (!staff) {
+        throw new NotFoundError('Colaborador no encontrado.')
+      }
+      return staff
+    } catch (error) {
+      throw error
     }
-    return staff
   }
 
   private async validateGoalAssignments({

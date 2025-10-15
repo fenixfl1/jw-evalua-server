@@ -6,6 +6,7 @@ import {
   ApiResponse,
   Pagination,
   SessionInfo,
+  SimpleCondition,
 } from '@src/types/api.types'
 import { NotFoundError } from '@src/errors/http.error'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
@@ -13,6 +14,7 @@ import { paginatedQuery, queryRunner } from '@src/helpers/query-utils'
 import { HTTP_STATUS_NO_CONTENT } from '@src/constants/status-codes'
 import { StaffModule } from '@src/entity/StaffXModule'
 import { Staff } from '@src/entity/Staff'
+import { publishEmailToQueue } from './email/email-producer.service'
 
 interface CreateModulePayload {
   DESCRIPTION: string
@@ -43,22 +45,28 @@ export class ModuleService extends BaseService {
     const { SUPERVISOR_ID, MEMBERS, DESCRIPTION } = payload
     const supervisor = await this.userRepository.findOne({
       where: { USER_ID: SUPERVISOR_ID },
+      relations: ['STAFF'],
     })
     if (!supervisor) {
       throw new NotFoundError('Supervisor no encontrado.')
     }
 
-    if (MEMBERS && MEMBERS.length) {
+    const memberIds = MEMBERS ?? []
+
+    if (memberIds.length) {
       const members = await this.staffRepository.findBy({
-        STAFF_ID: In(MEMBERS),
+        STAFF_ID: In(memberIds),
       })
-      if (members.length !== MEMBERS.length) {
+      if (members.length !== memberIds.length) {
         throw new NotFoundError('Algunos miembros no fueron encontrados.')
       }
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      const module = this.moduleRepository.create({
+    let staffToNotify: Staff[] = []
+    let createdModule: Module | null = null
+
+    return await this.dataSource.transaction(async (manager) => {
+      const moduleEntity = this.moduleRepository.create({
         DESCRIPTION,
         SUPERVISOR: supervisor,
         CREATED_AT: new Date(),
@@ -66,9 +74,10 @@ export class ModuleService extends BaseService {
         STATE: 'A',
       })
 
-      const newModule = await manager.save(module)
+      const newModule = await manager.save(moduleEntity)
+      createdModule = { ...newModule, SUPERVISOR: supervisor }
 
-      const memberships = MEMBERS.map((id) => ({
+      const memberships = memberIds.map((id) => ({
         STAFF_ID: id,
         MODULE: newModule,
         STATE: 'A',
@@ -78,6 +87,16 @@ export class ModuleService extends BaseService {
 
       if (memberships.length) {
         await manager.save(StaffModule, memberships)
+        staffToNotify = await manager.getRepository(Staff).find({
+          where: { STAFF_ID: In(memberIds) },
+        })
+      }
+
+      if (createdModule && staffToNotify.length) {
+        await this.notifyModuleAssignments({
+          module: createdModule,
+          staffMembers: staffToNotify,
+        })
       }
 
       return this.success({ message: 'Módulo creado con éxito.' })
@@ -229,6 +248,7 @@ export class ModuleService extends BaseService {
 
     const module = await this.moduleRepository.findOne({
       where: { MODULE_ID },
+      relations: ['SUPERVISOR', 'SUPERVISOR.STAFF'],
     })
     if (!module) {
       throw new NotFoundError('Módulo no encontrado.')
@@ -239,9 +259,17 @@ export class ModuleService extends BaseService {
       where: { MODULE_ID, STAFF_ID: In(staffIds) },
     })
     const existingMap = new Map(existingMembers.map((em) => [em.STAFF_ID, em]))
+    const staffIdsToNotify: number[] = []
 
     const data = MEMBERS.map((member) => {
       const existingMember = existingMap.get(member.STAFF_ID)
+      const isActivating =
+        member.STATE === 'A' &&
+        (!existingMember || existingMember.STATE !== 'A')
+
+      if (isActivating) {
+        staffIdsToNotify.push(member.STAFF_ID)
+      }
 
       return {
         ...(existingMember
@@ -258,7 +286,90 @@ export class ModuleService extends BaseService {
 
     await this.staffModuleRepository.save(data)
 
+    if (staffIdsToNotify.length) {
+      const staffMembers = await this.staffRepository.find({
+        where: { STAFF_ID: In(staffIdsToNotify) },
+      })
+
+      if (staffMembers.length) {
+        await this.notifyModuleAssignments({
+          module,
+          staffMembers,
+        })
+      }
+    }
+
     return this.success({ message: 'Operación completada con éxito.' })
+  }
+
+  @CatchServiceError()
+  async getModuleMembers(payload: SimpleCondition<StaffModule>) {
+    const { MODULE_ID, STATE = 'A' } = payload.condition
+
+    const statement = `
+        select s."NAME",
+            s."LAST_NAME",
+            s."STAFF_ID",
+            s."EMAIL",
+            s."PHONE",
+            s."IDENTITY_DOCUMENT",
+            sxm."MODULE_ID",
+            sxm."STAFF_MODULE_ID",
+            sxm."STATE"
+        from public."STAFF_X_MODULE" sxm
+        join public."STAFF" s
+      on s."STAFF_ID" = sxm."STAFF_ID"
+      where sxm."MODULE_ID" = $1
+        and ( cast($2 as text) is null
+          or sxm."STATE" = cast($2 as text) );
+    `
+
+    const data = await queryRunner<Staff>(statement, [MODULE_ID, STATE])
+
+    if (!data.length) {
+      return this.noContent()
+    }
+
+    return this.success({ data })
+  }
+
+  private async notifyModuleAssignments({
+    module,
+    staffMembers,
+  }: {
+    module: Module
+    staffMembers: Staff[]
+  }): Promise<void> {
+    if (!staffMembers.length) {
+      return
+    }
+
+    const supervisorStaff = module.SUPERVISOR?.STAFF
+    const supervisorName = supervisorStaff
+      ? `${supervisorStaff.NAME} ${supervisorStaff.LAST_NAME}`
+      : 'No asignado'
+    const supervisorEmail = supervisorStaff?.EMAIL ?? ''
+
+    await Promise.all(
+      staffMembers
+        .filter((staff) => staff.EMAIL)
+        .map((staff) =>
+          publishEmailToQueue({
+            to: staff.EMAIL,
+            subject: 'Asignación a modulo',
+            templateName: 'module',
+            text: `Hola ${staff.NAME}, has sido asignado al modulo ${module.DESCRIPTION}.`,
+            record: {
+              staffName: `${staff.NAME} ${staff.LAST_NAME}`,
+              staffEmail: staff.EMAIL,
+              moduleName: module.DESCRIPTION,
+              moduleId: module.MODULE_ID,
+              supervisorName,
+              supervisorEmail,
+            },
+          })
+        )
+    )
   }
 
   @CatchServiceError()

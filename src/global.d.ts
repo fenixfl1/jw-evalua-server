@@ -25,7 +25,7 @@ declare global {
       REDIRECT_URI: string
       REFRESH_TOKEN: string
       RABBITMQ_URL: string
-      ADMIN_APP_URL: string
+      APP_URL: string
       CLIENT_APP_URL: string
       SESSION_EXPIRATION_MAGNITUDE: string
       SESSION_EXPIRATION_TIME: string

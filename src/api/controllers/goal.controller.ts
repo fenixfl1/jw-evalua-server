@@ -102,8 +102,11 @@ export const getGoalsByModuleController = async (
   next: NextFunction
 ) => {
   try {
-    const moduleId = Number(req.params.moduleId)
-    const result = await goalService.getGoalsByModule(moduleId)
+    const { moduleId, period } = req.params
+    const result = await goalService.getGoalsByModule(
+      Number(moduleId),
+      Number(period)
+    )
     return sendResponse(res, result)
   } catch (error) {
     next(error)
@@ -136,6 +139,19 @@ export const getGoalsPaginationController = async (
       req.body,
       extractPagination(req.query)
     )
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const updateController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await goalService.update(req.body, req['sessionInfo'])
     return sendResponse(res, result)
   } catch (error) {
     next(error)

@@ -14,5 +14,12 @@ VALUES
   ('Dominio tecnico/funcional', 'Aplica conocimientos tecnicos o funcionales clave para ejecutar las tareas de su rol con excelencia.', NULL, 'A', NULL),
   ('Gestion de proyectos y tareas', 'Planifica recursos, coordina dependencias y da seguimiento a hitos de proyectos asignados.', NULL, 'A', NULL),
   ('Resolucion de problemas', 'Aborda incidencias con criterio, propone alternativas viables y ejecuta soluciones sostenibles.', NULL, 'A', NULL),
-  ('Responsabilidad y compromiso', 'Asume la propiedad de los resultados, cumple acuerdos y mantiene una conducta etica.', NULL, 'A', NULL)
+  ('Responsabilidad y compromiso', 'Asume la propiedad de los resultados, cumple acuerdos y mantiene una conducta etica.', NULL, 'A', NULL),
+  ('Manejo de maquinas de costura industrial', 'Saber operar correctamente maquinas planas, overlock, recubridora, etc., manteniendo calidad y velocidad.', NULL, 'A', NULL),
+  ('Control de calidad en la costura', 'Revisar que las prendas no tengan defectos, costuras torcidas, roturas o diferencias en las medidas.', NULL, 'A', NULL),
+  ('Responsabilidad y puntualidad', 'Cumplir con los horarios, asistir con regularidad y asumir sus tareas sin supervision constante.', NULL, 'A', NULL),
+  ('Atencion al detalle', 'Detectar errores pequenos en la costura o en el ensamblaje antes de que pasen al siguiente proceso.', NULL, 'A', NULL),
+  ('Cumplimiento de normas de seguridad y limpieza (5S)', 'Mantener su area ordenada y seguir los procedimientos de seguridad industrial.', NULL, 'A', NULL),
+  ('Enhebrado y ajuste basico de la maquina', 'Saber preparar su maquina correctamente y solucionar fallas simples sin depender del mecanico.', NULL, 'A', NULL),
+  ('Compromiso con la produccion y la calidad', 'Trabajar con enfoque en alcanzar las metas y mantener los estandares de calidad de la empresa.', NULL, 'A', NULL)
 ON CONFLICT ("NAME") DO NOTHING;
