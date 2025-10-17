@@ -76,9 +76,6 @@ export class Staff {
   @Column({ type: 'integer', nullable: true })
   UPDATED_BY?: number
 
-  @Column({ type: 'number', nullable: true })
-  MODULE_ID: number
-
   @ManyToOne(() => Module, { nullable: true })
   @JoinColumn({ name: 'MODULE_ID' })
   MODULE: Module

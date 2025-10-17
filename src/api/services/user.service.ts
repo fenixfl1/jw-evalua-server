@@ -276,15 +276,19 @@ export class UserService extends BaseService {
         S."LAST_NAME",
         S."EMAIL",
         S."PHONE",
-        STRING_AGG(R."NAME", ', ') AS "ROLES"
+        S."IDENTITY_DOCUMENT",
+        S."BIRTH_DATE",
+        S."CREATED_AT",
+        STRING_AGG(R."NAME", ', ') "ROLES"
       FROM  
-        public."USERS" AS U
-        LEFT JOIN public."STAFF" AS S ON S."STAFF_ID" = U."STAFF_ID"
-        LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID"
-        LEFT JOIN public."ROLE" AS R ON R."ROLE_ID" = RXU."ROLE_ID"
+        public."USERS" U
+        LEFT JOIN public."STAFF" S ON S."STAFF_ID" = U."STAFF_ID"
+        LEFT JOIN public."ROLES_X_USER" RXU ON RXU."USER_ID" = U."USER_ID" AND RXU."STATE" = 'A'
+        LEFT JOIN public."ROLE" R ON R."ROLE_ID" = RXU."ROLE_ID"
       GROUP BY 
         U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
-        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE"
+        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",
+         S."IDENTITY_DOCUMENT", S."BIRTH_DATE", S."CREATED_AT"
       ) AS SUBQUERY
     WHERE
       "USERNAME" = $1
