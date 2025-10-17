@@ -76,9 +76,8 @@ export class Staff {
   @Column({ type: 'integer', nullable: true })
   UPDATED_BY?: number
 
-  @ManyToOne(() => Module, { nullable: true })
-  @JoinColumn({ name: 'MODULE_ID' })
-  MODULE: Module
+  @Column({ type: 'integer', nullable: true })
+  MODULE_ID: number
 
   @OneToMany(() => Evaluation, (evaluation) => evaluation.STAFF)
   EVALUATIONS_RECEIVED: Evaluation[]

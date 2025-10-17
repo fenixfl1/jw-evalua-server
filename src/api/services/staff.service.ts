@@ -109,23 +109,30 @@ export class StaffService extends BaseService {
     const { values, whereClause } = whereClauseBuilder(payload)
 
     const statement = `
-      select *
-        from (
-        select  s.*,
-                u."USER_ID",
-                u."USERNAME",
-                u."IS_ACTIVE",
-                sxm_active."MODULE_ID"
-          from public."STAFF" s
-          left join public."USERS" u
-        on u."STAFF_ID" = s."STAFF_ID"
-          left join public."STAFF_X_MODULE" sxm_active
-        on sxm_active."STAFF_ID" = s."STAFF_ID"
-            and sxm_active."STATE" = 'A'  -- módulo activo según BaseEntity.STATE
-          left join public."MODULE" m
-        on m."MODULE_ID" = sxm_active."MODULE_ID"
-          order by s."STAFF_ID"
-      ) subquery
+      select
+        *
+      from
+        (
+          select
+            s.*,
+            u."USER_ID",
+            u."USERNAME",
+            u."IS_ACTIVE",
+            m."DESCRIPTION" "DESC_MODULE",
+            m."STATE" "MODULE_STATE",
+            s."NAME" || ' ' 
+            || s."LAST_NAME" || ' ' 
+            || s."IDENTITY_DOCUMENT" || ' ' 
+            || s."PHONE" || ' ' 
+            || s."EMAIL" || ' '
+            || u."USERNAME"  "FILTER"
+          from
+            public."STAFF" s
+            LEFT JOIN public."USERS" u ON u."STAFF_ID" = s."STAFF_ID"
+            LEFT JOIN public."MODULE" m ON m."MODULE_ID" = s."MODULE_ID"
+          order by
+            s."STAFF_ID"
+        ) subquery
       ${whereClause}
     `
 

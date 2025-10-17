@@ -26,9 +26,6 @@ export class Module extends BaseEntity {
   @JoinColumn({ name: 'SUPERVISOR_ID' })
   SUPERVISOR: User
 
-  @OneToMany(() => Staff, (user) => user.MODULE)
-  MEMBERS: Staff[]
-
   @OneToMany(() => Evaluation, (evaluation) => evaluation.MODULE)
   EVALUATIONS: Evaluation[]
 }

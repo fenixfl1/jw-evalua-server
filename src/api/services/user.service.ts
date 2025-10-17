@@ -230,20 +230,21 @@ export class UserService extends BaseService {
         S."EMAIL",
         S."PHONE",
         S."STAFF_ID",
-        STRING_AGG(RXU."ROLE_ID"::TEXT, ', ') AS "ROLE_ID",
-        STRING_AGG(R."NAME", ', ') AS "ROLES",
+        S."ADDRESS",
+        STRING_AGG(RXU."ROLE_ID"::TEXT, ', ') "ROLE_ID",
+        STRING_AGG(R."NAME", ', ') "ROLES",
         S."NAME" || ' ' || S."LAST_NAME" || ' ' || U."USERNAME"  || ' ' || S."PHONE" AS "FILTER"
       FROM  
-        public."USERS" AS U
-        LEFT JOIN public."STAFF" AS S ON S."STAFF_ID" = U."STAFF_ID"
-        LEFT JOIN public."ROLES_X_USER" AS RXU ON RXU."USER_ID" = U."USER_ID" AND RXU."STATE" = 'A'
-        LEFT JOIN public."ROLE" AS R ON R."ROLE_ID" = RXU."ROLE_ID"
+        public."USERS" U
+        LEFT JOIN public."STAFF" S ON S."STAFF_ID" = U."STAFF_ID"
+        LEFT JOIN public."ROLES_X_USER" RXU ON RXU."USER_ID" = U."USER_ID" AND RXU."STATE" = 'A'
+        LEFT JOIN public."ROLE" R ON R."ROLE_ID" = RXU."ROLE_ID"
         LEFT JOIN public."STAFF" c ON c."STAFF_ID" = U."CREATED_BY"
       GROUP BY 
         U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
-        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",S."STAFF_ID",
+        S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",S."STAFF_ID", S."ADDRESS",
         C."NAME", C."LAST_NAME"
-      ) AS SUBQUERY
+      ) SUBQUERY
       ${whereClause}
       `
 
@@ -276,6 +277,7 @@ export class UserService extends BaseService {
         S."LAST_NAME",
         S."EMAIL",
         S."PHONE",
+        S."ADDRESS",
         S."IDENTITY_DOCUMENT",
         S."BIRTH_DATE",
         S."CREATED_AT",
@@ -288,7 +290,7 @@ export class UserService extends BaseService {
       GROUP BY 
         U."USERNAME", U."USER_ID", U."IS_ACTIVE", U."AVATAR", U."STATE",
         S."NAME", S."LAST_NAME", S."EMAIL", S."PHONE",
-         S."IDENTITY_DOCUMENT", S."BIRTH_DATE", S."CREATED_AT"
+         S."IDENTITY_DOCUMENT", S."BIRTH_DATE", S."CREATED_AT", S."ADDRESS"
       ) AS SUBQUERY
     WHERE
       "USERNAME" = $1
