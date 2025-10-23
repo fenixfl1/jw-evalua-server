@@ -184,7 +184,7 @@ export class ModuleService extends BaseService {
       return this.noContent()
     }
 
-    const data: Module[] = []
+    const data = []
     for (const module of result) {
       const members = await this.getMembers(module.MODULE_ID, [
         'STAFF_ID',

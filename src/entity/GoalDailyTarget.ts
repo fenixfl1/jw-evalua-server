@@ -44,4 +44,11 @@ export class GoalDailyTarget extends BaseEntity {
 
   @Column({ type: 'numeric', transformer: numericTransformer })
   TARGET_VALUE: number
+
+  @Column({
+    type: 'numeric',
+    transformer: numericTransformer,
+    nullable: true,
+  })
+  TARGET_TIME: number | null
 }

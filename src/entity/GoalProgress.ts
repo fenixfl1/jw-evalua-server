@@ -58,4 +58,11 @@ export class GoalProgress extends BaseEntity {
 
   @Column({ type: 'numeric', transformer: numericTransformer })
   ACTUAL_VALUE: number
+
+  @Column({
+    type: 'numeric',
+    nullable: true,
+    transformer: numericTransformer,
+  })
+  ACTUAL_TIME: number | null
 }

@@ -50,6 +50,13 @@ interface ModuleGoalCompliance {
   targetValue: number
   actualValue: number
   compliance: number | null
+  targetTime: number
+  actualTime: number
+  timeEfficiency: number | null
+  timeVariance: number
+  goalsAssigned: number
+  goalsCompleted: number
+  completionRate: number | null
 }
 
 interface StaffDistributionEntry {
@@ -73,10 +80,147 @@ interface DashboardFilterOptions {
   periods: number[]
 }
 
+interface ModuleTopPerformer {
+  moduleId: number | null
+  moduleName: string
+  staffId: number | null
+  staffName: string | null
+  averageScore: number | null
+  evaluationsCompleted: number
+  lastEvaluationAt: string | null
+  rank: number
+}
+
+interface GoalProductivityDetail {
+  goalModuleId: number | null
+  goalId: number | null
+  moduleId: number | null
+  moduleName: string
+  period: number | null
+  targetValue: number
+  targetTime: number
+  actualValue: number
+  actualTime: number
+}
+
+interface GoalProductivityModuleAccumulator {
+  moduleId: number | null
+  moduleName: string
+  targetValue: number
+  actualValue: number
+  targetTime: number
+  actualTime: number
+  goalsAssigned: number
+  goalsCompleted: number
+  completedTargetTime: number
+  completedActualTime: number
+  completedCount: number
+  completedOnTime: number
+  completedLate: number
+  inProgress: number
+  pending: number
+}
+
+interface GoalProductivityModule {
+  moduleId: number | null
+  moduleName: string
+  totalGoals: number
+  completedGoals: number
+  completionRate: number | null
+  goalsOnTime: number
+  goalsLate: number
+  goalsInProgress: number
+  goalsPending: number
+  timeEfficiency: number | null
+  averageTargetTime: number | null
+  averageActualTime: number | null
+  averageTimeVariance: number | null
+}
+
+interface GoalProductivityTrendPoint {
+  period: number | null
+  periodLabel: string
+  totalGoals: number
+  completedGoals: number
+  completionRate: number | null
+  targetValue: number
+  actualValue: number
+  targetTime: number
+  actualTime: number
+  averageTargetTime: number | null
+  averageActualTime: number | null
+}
+
+interface GoalProductivityTotals {
+  totalGoals: number
+  completedGoals: number
+  completionRate: number | null
+  averageTargetTime: number | null
+  averageActualTime: number | null
+  averageTimeVariance: number | null
+  totalTargetValue: number
+  totalActualValue: number
+  totalTargetTime: number
+  totalActualTime: number
+}
+
+interface GoalTimeInsights {
+  completedOnTime: number
+  completedLate: number
+  completedAhead: number
+  inProgress: number
+  notStarted: number
+  averageTimeVariance: number | null
+  averageTargetTime: number | null
+  averageActualTime: number | null
+}
+
+interface EmployeeProductivityEntry {
+  staffId: number | null
+  staffName: string
+  modules: string[]
+  assignedGoals: number
+  completedGoals: number
+  completionRate: number | null
+  completedOnTime: number
+  completedLate: number
+  inProgressGoals: number
+  pendingGoals: number
+  totalTargetTime: number
+  totalActualTime: number
+  averageTargetTime: number | null
+  averageActualTime: number | null
+  averageTimeVariance: number | null
+  efficiency: number | null
+}
+
+interface GoalProductivityMetrics {
+  totals: GoalProductivityTotals
+  byModule: GoalProductivityModule[]
+  byPeriod: GoalProductivityTrendPoint[]
+  timeInsights: GoalTimeInsights
+  employees: EmployeeProductivityEntry[]
+}
+
 interface GoalComplianceSummary {
   items: ModuleGoalCompliance[]
   averageCompliance: number | null
   activeGoals: number
+  productivity: GoalProductivityMetrics
+}
+
+interface DashboardDailySummary {
+  date: string
+  targetValue: number
+  actualValue: number
+  completionRate: number | null
+  targetTime: number | null
+  actualTime: number | null
+  timeVariance: number | null
+  activeGoals: number
+  completedGoals: number
+  evaluationsCompleted: number
+  activityCount: number
 }
 
 interface DashboardSummary {
@@ -87,6 +231,9 @@ interface DashboardSummary {
   staffDistribution: StaffDistributionEntry[]
   recentEvaluations: RecentEvaluation[]
   filters: DashboardFilterOptions
+  goalProductivity: GoalProductivityMetrics
+  moduleTopPerformers: ModuleTopPerformer[]
+  dailySummary: DashboardDailySummary
 }
 
 interface DashboardActivityFilters {
@@ -131,6 +278,8 @@ export class DashboardService extends BaseService {
       staffDistribution,
       recentEvaluations,
       filterOptions,
+      moduleTopPerformers,
+      dailySummary,
     ] = await Promise.all([
       this.getKpis(normalizedFilters),
       this.getEvaluationTrend(normalizedFilters),
@@ -139,6 +288,8 @@ export class DashboardService extends BaseService {
       this.getStaffDistribution(normalizedFilters),
       this.getRecentEvaluations(normalizedFilters),
       this.getFilterOptions(),
+      this.getModuleTopPerformers(normalizedFilters),
+      this.getDailySummary(normalizedFilters),
     ])
 
     const kpis: DashboardKpis = {
@@ -155,6 +306,9 @@ export class DashboardService extends BaseService {
       staffDistribution,
       recentEvaluations,
       filters: filterOptions,
+      goalProductivity: goalSummary.productivity,
+      moduleTopPerformers,
+      dailySummary,
     }
 
     return this.success({ data })
@@ -463,107 +617,751 @@ export class DashboardService extends BaseService {
     })
   }
 
-  private async getGoalComplianceSummary(
+  private async getGoalProductivityDetails(
     filters: DashboardSummaryFilters
-  ): Promise<GoalComplianceSummary> {
+  ): Promise<GoalProductivityDetail[]> {
     const assignmentWhere = this.buildGoalAssignmentWhere(filters)
     const progressWhere = this.buildGoalProgressWhere(filters)
 
-    const combinedParams = {
+    const params: Record<string, unknown> = {
       ...assignmentWhere.params,
       ...progressWhere.params,
     }
 
     const sql = `
-      WITH TARGET AS (
+      WITH ASSIGNED AS (
         SELECT
-          gm."MODULE_ID",
+          gm."GOAL_MODULE_ID",
           gm."GOAL_ID",
+          gm."MODULE_ID",
           gm."PERIOD",
-          SUM(gm."TARGET_VALUE") AS "TARGET_VALUE"
+          SUM(COALESCE(gm."TARGET_VALUE", 0)) AS "TARGET_VALUE",
+          SUM(COALESCE(gdt."TARGET_TIME", 0)) AS "TARGET_TIME"
         FROM public."GOAL_X_MODULE" gm
         INNER JOIN public."GOAL" g ON g."GOAL_ID" = gm."GOAL_ID"
+        LEFT JOIN public."GOAL_DAILY_TARGET" gdt
+          ON gdt."GOAL_MODULE_ID" = gm."GOAL_MODULE_ID"
+         AND gdt."STATE" = 'A'
         ${assignmentWhere.clause}
-        GROUP BY gm."MODULE_ID", gm."GOAL_ID", gm."PERIOD"
+        GROUP BY gm."GOAL_MODULE_ID", gm."GOAL_ID", gm."MODULE_ID", gm."PERIOD"
       ),
       PROGRESS AS (
         SELECT
-          gp."MODULE_ID",
+          gp."GOAL_MODULE_ID",
           gp."GOAL_ID",
+          gp."MODULE_ID",
           gp."PERIOD",
-          SUM(gp."ACTUAL_VALUE") AS "ACTUAL_VALUE"
+          SUM(COALESCE(gp."ACTUAL_VALUE", 0)) AS "ACTUAL_VALUE",
+          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME"
         FROM public."GOAL_PROGRESS" gp
         ${progressWhere.clause}
-        GROUP BY gp."MODULE_ID", gp."GOAL_ID", gp."PERIOD"
-      ),
-      COMBINED AS (
-        SELECT
-          COALESCE(t."MODULE_ID", p."MODULE_ID") AS "MODULE_ID",
-          COALESCE(t."GOAL_ID", p."GOAL_ID") AS "GOAL_ID",
-          COALESCE(t."PERIOD", p."PERIOD") AS "PERIOD",
-          COALESCE(t."TARGET_VALUE", 0) AS "TARGET_VALUE",
-          COALESCE(p."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE"
-        FROM TARGET t
-        FULL OUTER JOIN PROGRESS p
-          ON p."GOAL_ID" = t."GOAL_ID"
-         AND p."MODULE_ID" IS NOT DISTINCT FROM t."MODULE_ID"
-         AND p."PERIOD" IS NOT DISTINCT FROM t."PERIOD"
+        GROUP BY gp."GOAL_MODULE_ID", gp."GOAL_ID", gp."MODULE_ID", gp."PERIOD"
       )
       SELECT
-        c."MODULE_ID",
+        COALESCE(a."GOAL_MODULE_ID", p."GOAL_MODULE_ID") AS "GOAL_MODULE_ID",
+        COALESCE(a."GOAL_ID", p."GOAL_ID") AS "GOAL_ID",
+        COALESCE(a."MODULE_ID", p."MODULE_ID") AS "MODULE_ID",
         m."DESCRIPTION" AS "MODULE_NAME",
-        SUM(c."TARGET_VALUE") AS "TARGET_VALUE",
-        SUM(c."ACTUAL_VALUE") AS "ACTUAL_VALUE",
-        CASE
-          WHEN SUM(c."TARGET_VALUE") = 0 THEN NULL
-          ELSE ROUND(
-            LEAST(
-              SUM(c."ACTUAL_VALUE") / NULLIF(SUM(c."TARGET_VALUE"), 0) * 100,
-              100
-            )::numeric,
-            2
-          )
-        END AS "COMPLIANCE"
-      FROM COMBINED c
-      LEFT JOIN public."MODULE" m ON m."MODULE_ID" = c."MODULE_ID"
-      GROUP BY c."MODULE_ID", m."DESCRIPTION"
-      ORDER BY m."DESCRIPTION" NULLS LAST
+        COALESCE(a."PERIOD", p."PERIOD") AS "PERIOD",
+        COALESCE(a."TARGET_VALUE", 0) AS "TARGET_VALUE",
+        COALESCE(a."TARGET_TIME", 0) AS "TARGET_TIME",
+        COALESCE(p."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
+        COALESCE(p."ACTUAL_TIME", 0) AS "ACTUAL_TIME"
+      FROM ASSIGNED a
+      FULL OUTER JOIN PROGRESS p
+        ON p."GOAL_MODULE_ID" = a."GOAL_MODULE_ID"
+       AND p."PERIOD" IS NOT DISTINCT FROM a."PERIOD"
+      LEFT JOIN public."MODULE" m
+        ON m."MODULE_ID" = COALESCE(a."MODULE_ID", p."MODULE_ID")
     `
 
-    const query = preparePostgresQuery(sql, combinedParams)
+    const query = preparePostgresQuery(sql, params)
     const rows = await queryRunner<{
+      GOAL_MODULE_ID: number | null
+      GOAL_ID: number | null
       MODULE_ID: number | null
       MODULE_NAME: string | null
+      PERIOD: number | null
       TARGET_VALUE: string | number | null
+      TARGET_TIME: string | number | null
       ACTUAL_VALUE: string | number | null
-      COMPLIANCE: string | number | null
+      ACTUAL_TIME: string | number | null
     }>(query.query, query.values)
 
-    const items = rows.map((row) => {
-      const target = Number(row.TARGET_VALUE ?? 0)
-      const actual = Number(row.ACTUAL_VALUE ?? 0)
+    return rows.map((row) => ({
+      goalModuleId:
+        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null,
+      goalId: row.GOAL_ID !== null ? Number(row.GOAL_ID) : null,
+      moduleId: row.MODULE_ID !== null ? Number(row.MODULE_ID) : null,
+      moduleName: this.normalizeModuleName(row.MODULE_NAME),
+      period: row.PERIOD !== null ? Number(row.PERIOD) : null,
+      targetValue: Number(row.TARGET_VALUE ?? 0),
+      targetTime: Number(row.TARGET_TIME ?? 0),
+      actualValue: Number(row.ACTUAL_VALUE ?? 0),
+      actualTime: Number(row.ACTUAL_TIME ?? 0),
+    }))
+  }
+
+  private async getGoalComplianceSummary(
+    filters: DashboardSummaryFilters
+  ): Promise<GoalComplianceSummary> {
+    const details = await this.getGoalProductivityDetails(filters)
+    const moduleAccumulators = new Map<
+      number | null,
+      GoalProductivityModuleAccumulator
+    >()
+
+    details.forEach((detail) => {
+      const key = detail.moduleId ?? null
+      let accumulator = moduleAccumulators.get(key)
+
+      if (!accumulator) {
+        accumulator = {
+          moduleId: detail.moduleId ?? null,
+          moduleName: detail.moduleName,
+          targetValue: 0,
+          actualValue: 0,
+          targetTime: 0,
+          actualTime: 0,
+          goalsAssigned: 0,
+          goalsCompleted: 0,
+          completedTargetTime: 0,
+          completedActualTime: 0,
+          completedCount: 0,
+          completedOnTime: 0,
+          completedLate: 0,
+          inProgress: 0,
+          pending: 0,
+        }
+        moduleAccumulators.set(key, accumulator)
+      }
+
+      accumulator.targetValue += detail.targetValue
+      accumulator.actualValue += detail.actualValue
+      accumulator.targetTime += detail.targetTime
+      accumulator.actualTime += detail.actualTime
+
+      if (detail.targetValue > 0) {
+        accumulator.goalsAssigned += 1
+        if (detail.actualValue >= detail.targetValue) {
+          accumulator.goalsCompleted += 1
+          accumulator.completedTargetTime += detail.targetTime
+          accumulator.completedActualTime += detail.actualTime
+          accumulator.completedCount += 1
+          const isLate =
+            detail.targetTime > 0 && detail.actualTime > detail.targetTime
+          if (isLate) {
+            accumulator.completedLate += 1
+          } else {
+            accumulator.completedOnTime += 1
+          }
+        } else if (detail.actualValue > 0) {
+          accumulator.inProgress += 1
+        } else {
+          accumulator.pending += 1
+        }
+      }
+    })
+
+    const items = Array.from(moduleAccumulators.values()).map((entry) => {
       const compliance =
-        row.COMPLIANCE !== null && row.COMPLIANCE !== undefined
-          ? Number(Number(row.COMPLIANCE).toFixed(2))
+        entry.targetValue > 0
+          ? this.roundNumber((entry.actualValue / entry.targetValue) * 100)
           : null
 
+      const timeEfficiency =
+        entry.targetTime > 0
+          ? this.roundNumber((entry.actualTime / entry.targetTime) * 100)
+          : null
+
+      const timeVariance = this.roundNumber(
+        entry.actualTime - entry.targetTime
+      )
+
       return {
-        moduleId: row.MODULE_ID !== null ? Number(row.MODULE_ID) : null,
-        moduleName: this.normalizeModuleName(row.MODULE_NAME),
-        targetValue: target,
-        actualValue: actual,
+        moduleId: entry.moduleId,
+        moduleName: entry.moduleName,
+        targetValue: entry.targetValue,
+        actualValue: entry.actualValue,
         compliance,
+        targetTime: this.roundNumber(entry.targetTime),
+        actualTime: this.roundNumber(entry.actualTime),
+        timeEfficiency,
+        timeVariance,
+        goalsAssigned: entry.goalsAssigned,
+        goalsCompleted: entry.goalsCompleted,
+        completionRate: this.calculateCompletionRate(
+          entry.goalsCompleted,
+          entry.goalsAssigned
+        ),
       }
     })
 
     const averageCompliance = this.calculateAverageCompliance(items)
     const activeGoals = await this.getActiveGoalCount(filters)
+    const productivity = this.calculateGoalProductivityMetrics(
+      details,
+      moduleAccumulators
+    )
+    const employeeProductivity = await this.getEmployeeProductivitySummary(
+      filters,
+      details
+    )
+    productivity.employees = employeeProductivity
 
     return {
       items,
       averageCompliance,
       activeGoals,
+      productivity,
     }
+  }
+
+  private calculateGoalProductivityMetrics(
+    details: GoalProductivityDetail[],
+    moduleAccumulators: Map<number | null, GoalProductivityModuleAccumulator>
+  ): GoalProductivityMetrics {
+    const assignedDetails = details.filter(
+      (detail) => detail.targetValue > 0
+    )
+    const completedDetails = assignedDetails.filter(
+      (detail) => detail.actualValue >= detail.targetValue
+    )
+
+    let completedOnTimeCount = 0
+    let completedLateCount = 0
+    let completedAheadCount = 0
+    let inProgressCount = 0
+    let notStartedCount = 0
+
+    const varianceSamples: number[] = []
+    const targetTimeSamples: number[] = []
+    const actualTimeSamples: number[] = []
+
+    assignedDetails.forEach((detail) => {
+      const isCompleted = detail.actualValue >= detail.targetValue
+      const hasProgress = detail.actualValue > 0
+
+      if (isCompleted) {
+        const isLate =
+          detail.targetTime > 0 && detail.actualTime > detail.targetTime
+        if (isLate) {
+          completedLateCount += 1
+        } else {
+          completedOnTimeCount += 1
+          if (detail.targetTime > 0 && detail.actualTime < detail.targetTime) {
+            completedAheadCount += 1
+          }
+        }
+
+        varianceSamples.push(detail.actualTime - detail.targetTime)
+        if (detail.targetTime > 0) {
+          targetTimeSamples.push(detail.targetTime)
+        }
+        if (detail.actualTime > 0) {
+          actualTimeSamples.push(detail.actualTime)
+        }
+      } else if (hasProgress) {
+        inProgressCount += 1
+      } else {
+        notStartedCount += 1
+      }
+    })
+
+    const totalGoals = assignedDetails.length
+    const completedGoals = completedDetails.length
+
+    const totalTargetValue = details.reduce(
+      (acc, detail) => acc + detail.targetValue,
+      0
+    )
+    const totalActualValue = details.reduce(
+      (acc, detail) => acc + detail.actualValue,
+      0
+    )
+    const totalTargetTime = details.reduce(
+      (acc, detail) => acc + detail.targetTime,
+      0
+    )
+    const totalActualTime = details.reduce(
+      (acc, detail) => acc + detail.actualTime,
+      0
+    )
+
+    const averageTargetTime = this.average(
+      completedDetails.map((detail) => detail.targetTime),
+      { allowZero: false }
+    )
+    const averageActualTime = this.average(
+      completedDetails.map((detail) => detail.actualTime),
+      { allowZero: false }
+    )
+    const averageTimeVariance = this.average(
+      completedDetails.map((detail) => detail.actualTime - detail.targetTime),
+      { allowNegative: true }
+    )
+
+    const byModule = Array.from(moduleAccumulators.values())
+      .map((entry) => {
+        const averageTarget =
+          entry.completedCount > 0
+            ? this.roundNumber(
+                entry.completedTargetTime / entry.completedCount
+              )
+            : null
+        const averageActual =
+          entry.completedCount > 0
+            ? this.roundNumber(
+                entry.completedActualTime / entry.completedCount
+              )
+            : null
+        const averageVariance =
+          entry.completedCount > 0
+            ? this.roundNumber(
+                (entry.completedActualTime - entry.completedTargetTime) /
+                  entry.completedCount
+              )
+            : null
+
+        const timeEfficiency =
+          entry.targetTime > 0
+            ? this.roundNumber((entry.actualTime / entry.targetTime) * 100)
+            : null
+
+        return {
+          moduleId: entry.moduleId,
+          moduleName: entry.moduleName,
+          totalGoals: entry.goalsAssigned,
+          completedGoals: entry.goalsCompleted,
+          completionRate: this.calculateCompletionRate(
+            entry.goalsCompleted,
+            entry.goalsAssigned
+          ),
+          goalsOnTime: entry.completedOnTime,
+          goalsLate: entry.completedLate,
+          goalsInProgress: entry.inProgress,
+          goalsPending: entry.pending,
+          timeEfficiency,
+          averageTargetTime: averageTarget,
+          averageActualTime: averageActual,
+          averageTimeVariance: averageVariance,
+        }
+      })
+      .sort((a, b) => {
+        const rateA = a.completionRate ?? -Infinity
+        const rateB = b.completionRate ?? -Infinity
+        if (rateA === rateB) {
+          return b.completedGoals - a.completedGoals
+        }
+        return rateB - rateA
+      })
+
+    const periodAccumulators = new Map<
+      string,
+      {
+        period: number | null
+        periodLabel: string
+        totalGoals: number
+        completedGoals: number
+        targetValue: number
+        actualValue: number
+        targetTime: number
+        actualTime: number
+        completedTargetTime: number
+        completedActualTime: number
+        completedCount: number
+      }
+    >()
+
+    details.forEach((detail) => {
+      const periodKey = detail.period !== null ? String(detail.period) : 'null'
+      let entry = periodAccumulators.get(periodKey)
+
+      if (!entry) {
+        entry = {
+          period: detail.period !== null ? Number(detail.period) : null,
+          periodLabel:
+            detail.period !== null
+              ? this.formatPeriodLabel(detail.period)
+              : 'Sin periodo',
+          totalGoals: 0,
+          completedGoals: 0,
+          targetValue: 0,
+          actualValue: 0,
+          targetTime: 0,
+          actualTime: 0,
+          completedTargetTime: 0,
+          completedActualTime: 0,
+          completedCount: 0,
+        }
+        periodAccumulators.set(periodKey, entry)
+      }
+
+      entry.targetValue += detail.targetValue
+      entry.actualValue += detail.actualValue
+      entry.targetTime += detail.targetTime
+      entry.actualTime += detail.actualTime
+
+      if (detail.targetValue > 0) {
+        entry.totalGoals += 1
+        if (detail.actualValue >= detail.targetValue) {
+          entry.completedGoals += 1
+          entry.completedTargetTime += detail.targetTime
+          entry.completedActualTime += detail.actualTime
+          entry.completedCount += 1
+        }
+      }
+    })
+
+    const byPeriod = Array.from(periodAccumulators.values())
+      .map((entry) => {
+        const averageTarget =
+          entry.completedCount > 0
+            ? this.roundNumber(
+                entry.completedTargetTime / entry.completedCount
+              )
+            : null
+        const averageActual =
+          entry.completedCount > 0
+            ? this.roundNumber(
+                entry.completedActualTime / entry.completedCount
+              )
+            : null
+
+        return {
+          period: entry.period,
+          periodLabel: entry.periodLabel,
+          totalGoals: entry.totalGoals,
+          completedGoals: entry.completedGoals,
+          completionRate: this.calculateCompletionRate(
+            entry.completedGoals,
+            entry.totalGoals
+          ),
+          targetValue: entry.targetValue,
+          actualValue: entry.actualValue,
+          targetTime: this.roundNumber(entry.targetTime),
+          actualTime: this.roundNumber(entry.actualTime),
+          averageTargetTime: averageTarget,
+          averageActualTime: averageActual,
+        }
+      })
+      .sort((a, b) => {
+        if (a.period === null && b.period === null) {
+          return 0
+        }
+        if (a.period === null) {
+          return 1
+        }
+        if (b.period === null) {
+          return -1
+        }
+        return a.period - b.period
+      })
+
+    const timeInsights: GoalTimeInsights = {
+      completedOnTime: completedOnTimeCount,
+      completedLate: completedLateCount,
+      completedAhead: completedAheadCount,
+      inProgress: inProgressCount,
+      notStarted: notStartedCount,
+      averageTimeVariance,
+      averageTargetTime,
+      averageActualTime,
+    }
+
+    return {
+      totals: {
+        totalGoals,
+        completedGoals,
+        completionRate: this.calculateCompletionRate(
+          completedGoals,
+          totalGoals
+        ),
+        averageTargetTime,
+        averageActualTime,
+        averageTimeVariance,
+        totalTargetValue,
+        totalActualValue,
+        totalTargetTime: this.roundNumber(totalTargetTime),
+        totalActualTime: this.roundNumber(totalActualTime),
+      },
+      byModule,
+      byPeriod,
+      timeInsights,
+      employees: [],
+    }
+  }
+
+  private buildGoalModuleKey(
+    goalModuleId: number | null,
+    period: number | null
+  ): string {
+    const moduleKey = goalModuleId !== null ? String(goalModuleId) : 'null'
+    const periodKey = period !== null ? String(period) : 'null'
+    return `${moduleKey}-${periodKey}`
+  }
+
+  private async getEmployeeProductivitySummary(
+    filters: DashboardSummaryFilters,
+    details: GoalProductivityDetail[]
+  ): Promise<EmployeeProductivityEntry[]> {
+    if (!details.length) {
+      return []
+    }
+
+    const moduleDetailMap = new Map<
+      string,
+      { targetTime: number; targetValue: number }
+    >()
+
+    details.forEach((detail) => {
+      const key = this.buildGoalModuleKey(detail.goalModuleId, detail.period)
+      moduleDetailMap.set(key, {
+        targetTime: detail.targetTime,
+        targetValue: detail.targetValue,
+      })
+    })
+
+    const conditions: string[] = [
+      `gs."STATE" = 'A'`,
+      `g."STATE" = 'A'`,
+      `gm."STATE" = 'A'`,
+    ]
+    const params: Record<string, unknown> = {}
+
+    if (filters.moduleId !== undefined) {
+      conditions.push('gm."MODULE_ID" = :moduleId')
+      params.moduleId = filters.moduleId
+    }
+
+    if (filters.periodStart !== undefined) {
+      conditions.push('gs."PERIOD" >= :periodStart')
+      params.periodStart = filters.periodStart
+    }
+
+    if (filters.periodEnd !== undefined) {
+      conditions.push('gs."PERIOD" <= :periodEnd')
+      params.periodEnd = filters.periodEnd
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join('\n        AND ')}`
+      : ''
+
+    const sql = `
+      WITH staff_contrib AS (
+        SELECT
+          gp."GOAL_ID",
+          gp."STAFF_ID",
+          gp."PERIOD",
+          SUM(COALESCE(gp."ACTUAL_VALUE", 0)) AS "ACTUAL_VALUE",
+          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME"
+        FROM public."GOAL_PROGRESS" gp
+        WHERE gp."STATE" = 'A'
+          AND gp."SCOPE" = 'individual'
+          AND gp."STAFF_ID" IS NOT NULL
+        GROUP BY gp."GOAL_ID", gp."STAFF_ID", gp."PERIOD"
+      )
+      SELECT
+        gs."STAFF_ID" AS "STAFF_ID",
+        TRIM(
+          COALESCE(st."NAME", '') || ' ' || COALESCE(st."LAST_NAME", '')
+        ) AS "STAFF_NAME",
+        gm."MODULE_ID" AS "MODULE_ID",
+        m."DESCRIPTION" AS "MODULE_NAME",
+        gs."GOAL_ID" AS "GOAL_ID",
+        gs."PERIOD" AS "PERIOD",
+        gs."TARGET_VALUE" AS "STAFF_TARGET_VALUE",
+        gm."TARGET_VALUE" AS "MODULE_TARGET_VALUE",
+        gm."GOAL_MODULE_ID" AS "GOAL_MODULE_ID",
+        COALESCE(sc."ACTUAL_VALUE", 0) AS "STAFF_ACTUAL_VALUE",
+        COALESCE(sc."ACTUAL_TIME", 0) AS "STAFF_ACTUAL_TIME"
+      FROM public."GOAL_X_STAFF" gs
+      INNER JOIN public."GOAL" g ON g."GOAL_ID" = gs."GOAL_ID"
+      INNER JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_ID" = gs."GOAL_ID"
+       AND gm."PERIOD" IS NOT DISTINCT FROM gs."PERIOD"
+      LEFT JOIN staff_contrib sc
+        ON sc."GOAL_ID" = gs."GOAL_ID"
+       AND sc."STAFF_ID" = gs."STAFF_ID"
+       AND sc."PERIOD" IS NOT DISTINCT FROM gs."PERIOD"
+      LEFT JOIN public."STAFF" st ON st."STAFF_ID" = gs."STAFF_ID"
+      LEFT JOIN public."MODULE" m ON m."MODULE_ID" = gm."MODULE_ID"
+      ${whereClause}
+    `
+
+    const query = preparePostgresQuery(sql, params)
+    const rows = await queryRunner<{
+      STAFF_ID: number | null
+      STAFF_NAME: string | null
+      MODULE_ID: number | null
+      MODULE_NAME: string | null
+      GOAL_ID: number
+      PERIOD: number | null
+      STAFF_TARGET_VALUE: string | number | null
+      MODULE_TARGET_VALUE: string | number | null
+      GOAL_MODULE_ID: number | null
+      STAFF_ACTUAL_VALUE: string | number | null
+      STAFF_ACTUAL_TIME: string | number | null
+    }>(query.query, query.values)
+
+    if (!rows.length) {
+      return []
+    }
+
+    type StaffAccumulator = {
+      staffId: number
+      staffName: string
+      modules: Set<string>
+      assignedGoals: number
+      completedGoals: number
+      completedOnTime: number
+      completedLate: number
+      inProgressGoals: number
+      pendingGoals: number
+      totalTargetTime: number
+      totalActualTime: number
+      totalTargetValue: number
+      totalActualValue: number
+      timeVarianceSum: number
+    }
+
+    const staffMap = new Map<number, StaffAccumulator>()
+
+    rows.forEach((row) => {
+      if (row.STAFF_ID === null) {
+        return
+      }
+
+      const staffId = Number(row.STAFF_ID)
+      let entry = staffMap.get(staffId)
+
+      if (!entry) {
+        entry = {
+          staffId,
+          staffName:
+            this.normalizePersonName(row.STAFF_NAME) ?? 'Sin colaborador',
+          modules: new Set<string>(),
+          assignedGoals: 0,
+          completedGoals: 0,
+          completedOnTime: 0,
+          completedLate: 0,
+          inProgressGoals: 0,
+          pendingGoals: 0,
+          totalTargetTime: 0,
+          totalActualTime: 0,
+          totalTargetValue: 0,
+          totalActualValue: 0,
+          timeVarianceSum: 0,
+        }
+        staffMap.set(staffId, entry)
+      }
+
+      const moduleName = row.MODULE_NAME ?? 'Sin modulo'
+      entry.modules.add(moduleName)
+
+      const staffTargetValue = Number(row.STAFF_TARGET_VALUE ?? 0)
+      const staffActualValue = Number(row.STAFF_ACTUAL_VALUE ?? 0)
+      const staffActualTime = Number(row.STAFF_ACTUAL_TIME ?? 0)
+      const moduleTargetValue = Number(row.MODULE_TARGET_VALUE ?? 0)
+
+      const moduleKey = this.buildGoalModuleKey(
+        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null,
+        row.PERIOD !== null ? Number(row.PERIOD) : null
+      )
+      const moduleData = moduleDetailMap.get(moduleKey)
+      const moduleTargetTime = moduleData?.targetTime ?? 0
+      const effectiveModuleTargetValue =
+        moduleData?.targetValue ?? moduleTargetValue
+
+      const targetTimeShare =
+        effectiveModuleTargetValue > 0 && staffTargetValue > 0
+          ? (moduleTargetTime * staffTargetValue) /
+            effectiveModuleTargetValue
+          : 0
+
+      entry.assignedGoals += 1
+      entry.totalTargetValue += staffTargetValue
+      entry.totalActualValue += staffActualValue
+      entry.totalTargetTime += targetTimeShare
+      entry.totalActualTime += staffActualTime
+      entry.timeVarianceSum += staffActualTime - targetTimeShare
+
+      const completed =
+        staffTargetValue > 0 && staffActualValue >= staffTargetValue
+
+      if (completed) {
+        entry.completedGoals += 1
+        const isLate =
+          targetTimeShare > 0 && staffActualTime > targetTimeShare
+        if (isLate) {
+          entry.completedLate += 1
+        } else {
+          entry.completedOnTime += 1
+        }
+      } else if (staffActualValue > 0) {
+        entry.inProgressGoals += 1
+      } else {
+        entry.pendingGoals += 1
+      }
+    })
+
+    const employees = Array.from(staffMap.values())
+      .map((entry) => {
+        const completionRate = this.calculateCompletionRate(
+          entry.completedGoals,
+          entry.assignedGoals
+        )
+        const averageTargetTime =
+          entry.assignedGoals > 0
+            ? this.roundNumber(entry.totalTargetTime / entry.assignedGoals)
+            : null
+        const averageActualTime =
+          entry.completedGoals > 0
+            ? this.roundNumber(entry.totalActualTime / entry.completedGoals)
+            : entry.assignedGoals > 0
+            ? this.roundNumber(entry.totalActualTime / entry.assignedGoals)
+            : null
+        const averageTimeVariance =
+          entry.assignedGoals > 0
+            ? this.roundNumber(entry.timeVarianceSum / entry.assignedGoals)
+            : null
+        const efficiency =
+          entry.totalTargetTime > 0
+            ? this.roundNumber(
+                (entry.totalActualTime / entry.totalTargetTime) * 100
+              )
+            : null
+
+        return {
+          staffId: entry.staffId,
+          staffName: entry.staffName,
+          modules: Array.from(entry.modules).sort(),
+          assignedGoals: entry.assignedGoals,
+          completedGoals: entry.completedGoals,
+          completionRate,
+          completedOnTime: entry.completedOnTime,
+          completedLate: entry.completedLate,
+          inProgressGoals: entry.inProgressGoals,
+          pendingGoals: entry.pendingGoals,
+          totalTargetTime: this.roundNumber(entry.totalTargetTime),
+          totalActualTime: this.roundNumber(entry.totalActualTime),
+          averageTargetTime,
+          averageActualTime,
+          averageTimeVariance,
+          efficiency,
+        }
+      })
+      .sort((a, b) => {
+        const rateA = a.completionRate ?? -Infinity
+        const rateB = b.completionRate ?? -Infinity
+        if (rateA === rateB) {
+          return b.completedGoals - a.completedGoals
+        }
+        return rateB - rateA
+      })
+
+    return employees
   }
 
   private calculateAverageCompliance(
@@ -580,7 +1378,57 @@ export class DashboardService extends BaseService {
     }
 
     const sum = compliances.reduce((acc, value) => acc + value, 0)
-    return Number((sum / compliances.length).toFixed(2))
+    return this.roundNumber(sum / compliances.length)
+  }
+
+  private calculateCompletionRate(
+    completed: number,
+    total: number
+  ): number | null {
+    if (!total) {
+      return null
+    }
+
+    return this.roundNumber((completed / total) * 100)
+  }
+
+  private average(
+    values: number[],
+    options: { allowZero?: boolean; allowNegative?: boolean } = {}
+  ): number | null {
+    const { allowZero = true, allowNegative = false } = options
+
+    const valid = values.filter((value) => {
+      if (!Number.isFinite(value)) {
+        return false
+      }
+
+      if (!allowNegative && value < 0) {
+        return false
+      }
+
+      if (!allowZero && value === 0) {
+        return false
+      }
+
+      return true
+    })
+
+    if (!valid.length) {
+      return null
+    }
+
+    const sum = valid.reduce((acc, value) => acc + value, 0)
+    return this.roundNumber(sum / valid.length)
+  }
+
+  private roundNumber(value: number, decimals = 2): number {
+    if (!Number.isFinite(value)) {
+      return 0
+    }
+
+    const factor = 10 ** decimals
+    return Math.round(value * factor) / factor
   }
 
   private async getActiveGoalCount(
@@ -610,6 +1458,98 @@ export class DashboardService extends BaseService {
     )
 
     return Number(row?.COUNT ?? 0)
+  }
+
+  private async getModuleTopPerformers(
+    filters: DashboardSummaryFilters,
+    limitPerModule = 3
+  ): Promise<ModuleTopPerformer[]> {
+    const evaluationWhere = this.buildEvaluationWhereClause(filters)
+    const clause = `${evaluationWhere.clause} AND e."OVERALL_SCORE" IS NOT NULL`
+
+    const sql = `
+      WITH module_scores AS (
+        SELECT
+          e."MODULE_ID" AS "MODULE_ID",
+          m."DESCRIPTION" AS "MODULE_NAME",
+          e."STAFF_ID" AS "STAFF_ID",
+          TRIM(
+            COALESCE(s."NAME", '')
+            || ' '
+            || COALESCE(s."LAST_NAME", '')
+          ) AS "STAFF_NAME",
+          AVG(e."OVERALL_SCORE")::numeric AS "AVERAGE_SCORE",
+          COUNT(*)::int AS "EVALUATION_COUNT",
+          MAX(COALESCE(e."UPDATED_AT", e."CREATED_AT")) AS "LAST_EVALUATION"
+        FROM public."EVALUATION" e
+        LEFT JOIN public."MODULE" m ON m."MODULE_ID" = e."MODULE_ID"
+        LEFT JOIN public."STAFF" s ON s."STAFF_ID" = e."STAFF_ID"
+        ${clause}
+        GROUP BY
+          e."MODULE_ID",
+          m."DESCRIPTION",
+          e."STAFF_ID",
+          s."NAME",
+          s."LAST_NAME"
+      ),
+      ranked AS (
+        SELECT
+          ms.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY ms."MODULE_ID"
+            ORDER BY
+              ms."AVERAGE_SCORE" DESC NULLS LAST,
+              ms."EVALUATION_COUNT" DESC,
+              ms."LAST_EVALUATION" DESC NULLS LAST,
+              ms."STAFF_NAME" ASC
+          ) AS "RANK"
+        FROM module_scores ms
+      )
+      SELECT
+        "MODULE_ID",
+        "MODULE_NAME",
+        "STAFF_ID",
+        "STAFF_NAME",
+        "AVERAGE_SCORE",
+        "EVALUATION_COUNT",
+        "LAST_EVALUATION",
+        "RANK"
+      FROM ranked
+      WHERE "RANK" <= :limitPerModule
+      ORDER BY "MODULE_NAME" NULLS LAST, "RANK"
+    `
+
+    const query = preparePostgresQuery(sql, {
+      ...evaluationWhere.params,
+      limitPerModule,
+    })
+
+    const rows = await queryRunner<{
+      MODULE_ID: number | null
+      MODULE_NAME: string | null
+      STAFF_ID: number | null
+      STAFF_NAME: string | null
+      AVERAGE_SCORE: string | number | null
+      EVALUATION_COUNT: number
+      LAST_EVALUATION: Date | null
+      RANK: number
+    }>(query.query, query.values)
+
+    return rows.map((row) => ({
+      moduleId: row.MODULE_ID !== null ? Number(row.MODULE_ID) : null,
+      moduleName: this.normalizeModuleName(row.MODULE_NAME),
+      staffId: row.STAFF_ID !== null ? Number(row.STAFF_ID) : null,
+      staffName: this.normalizePersonName(row.STAFF_NAME),
+      averageScore:
+        row.AVERAGE_SCORE !== null && row.AVERAGE_SCORE !== undefined
+          ? Number(Number(row.AVERAGE_SCORE).toFixed(2))
+          : null,
+      evaluationsCompleted: Number(row.EVALUATION_COUNT ?? 0),
+      lastEvaluationAt: row.LAST_EVALUATION
+        ? row.LAST_EVALUATION.toISOString()
+        : null,
+      rank: Number(row.RANK ?? 0),
+    }))
   }
 
   private async getStaffDistribution(
@@ -723,6 +1663,172 @@ export class DashboardService extends BaseService {
           : null,
       updatedAt: row.UPDATED_AT ? row.UPDATED_AT.toISOString() : null,
     }))
+  }
+
+  private async getDailySummary(
+    filters: DashboardSummaryFilters
+  ): Promise<DashboardDailySummary> {
+    const params: Record<string, unknown> = {}
+
+    const targetConditions: string[] = [
+      `gdt."STATE" = 'A'`,
+      `gm."STATE" = 'A'`,
+      `gdt."TARGET_DATE" = CURRENT_DATE`,
+    ]
+
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      targetConditions.push('gm."MODULE_ID" = :moduleId')
+      params.moduleId = filters.moduleId
+    }
+
+    if (filters.periodStart !== undefined && filters.periodStart !== null) {
+      targetConditions.push('gdt."PERIOD" >= :periodStart')
+      params.periodStart = filters.periodStart
+    }
+
+    if (filters.periodEnd !== undefined && filters.periodEnd !== null) {
+      targetConditions.push('gdt."PERIOD" <= :periodEnd')
+      params.periodEnd = filters.periodEnd
+    }
+
+    const targetWhere = `WHERE ${targetConditions.join(' AND ')}`
+
+    const progressConditions: string[] = [
+      `gp."STATE" = 'A'`,
+      `gp."SCOPE" = 'module'`,
+      `gp."GOAL_MODULE_ID" IS NOT NULL`,
+      `DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) = CURRENT_DATE`,
+    ]
+
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      progressConditions.push('gp."MODULE_ID" = :moduleId')
+    }
+
+    if (filters.periodStart !== undefined && filters.periodStart !== null) {
+      progressConditions.push('gp."PERIOD" >= :periodStart')
+    }
+
+    if (filters.periodEnd !== undefined && filters.periodEnd !== null) {
+      progressConditions.push('gp."PERIOD" <= :periodEnd')
+    }
+
+    const progressWhere = `WHERE ${progressConditions.join(' AND ')}`
+
+    const sql = `
+      WITH DAILY_TARGETS AS (
+        SELECT
+          gdt."GOAL_MODULE_ID",
+          gm."MODULE_ID",
+          gdt."PERIOD",
+          SUM(COALESCE(gdt."TARGET_VALUE", 0)) AS "TARGET_VALUE",
+          SUM(COALESCE(gdt."TARGET_TIME", 0)) AS "TARGET_TIME"
+        FROM public."GOAL_DAILY_TARGET" gdt
+        INNER JOIN public."GOAL_X_MODULE" gm
+          ON gm."GOAL_MODULE_ID" = gdt."GOAL_MODULE_ID"
+        ${targetWhere}
+        GROUP BY gdt."GOAL_MODULE_ID", gm."MODULE_ID", gdt."PERIOD"
+      ),
+      PROGRESS AS (
+        SELECT
+          gp."GOAL_MODULE_ID",
+          gp."MODULE_ID",
+          gp."PERIOD",
+          SUM(COALESCE(gp."ACTUAL_VALUE", 0)) AS "ACTUAL_VALUE",
+          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME"
+        FROM public."GOAL_PROGRESS" gp
+        ${progressWhere}
+        GROUP BY gp."GOAL_MODULE_ID", gp."MODULE_ID", gp."PERIOD"
+      )
+      SELECT
+        COALESCE(SUM(dt."TARGET_VALUE"), 0) AS "TARGET_VALUE",
+        COALESCE(SUM(dt."TARGET_TIME"), 0) AS "TARGET_TIME",
+        COALESCE(SUM(COALESCE(pr."ACTUAL_VALUE", 0)), 0) AS "ACTUAL_VALUE",
+        COALESCE(SUM(COALESCE(pr."ACTUAL_TIME", 0)), 0) AS "ACTUAL_TIME",
+        COUNT(DISTINCT dt."GOAL_MODULE_ID") AS "ACTIVE_GOALS",
+        COUNT(
+          DISTINCT CASE
+            WHEN dt."TARGET_VALUE" > 0
+             AND COALESCE(pr."ACTUAL_VALUE", 0) >= dt."TARGET_VALUE"
+            THEN dt."GOAL_MODULE_ID"
+            ELSE NULL
+          END
+        ) AS "COMPLETED_GOALS"
+      FROM DAILY_TARGETS dt
+      LEFT JOIN PROGRESS pr
+        ON pr."GOAL_MODULE_ID" = dt."GOAL_MODULE_ID"
+       AND pr."PERIOD" = dt."PERIOD"
+    `
+
+    const summaryQuery = preparePostgresQuery(sql, params)
+    const [summaryRow] = await queryRunner<{
+      TARGET_VALUE: string | number | null
+      TARGET_TIME: string | number | null
+      ACTUAL_VALUE: string | number | null
+      ACTUAL_TIME: string | number | null
+      ACTIVE_GOALS: number | null
+      COMPLETED_GOALS: number | null
+    }>(summaryQuery.query, summaryQuery.values)
+
+    const targetValue = Number(summaryRow?.TARGET_VALUE ?? 0)
+    const actualValue = Number(summaryRow?.ACTUAL_VALUE ?? 0)
+    const targetTime = Number(summaryRow?.TARGET_TIME ?? 0)
+    const actualTime = Number(summaryRow?.ACTUAL_TIME ?? 0)
+    const activeGoals = Number(summaryRow?.ACTIVE_GOALS ?? 0)
+    const completedGoals = Number(summaryRow?.COMPLETED_GOALS ?? 0)
+
+    const completionRate =
+      targetValue > 0
+        ? this.roundNumber(
+            Math.min((actualValue / targetValue) * 100, 150),
+            1
+          )
+        : null
+
+    const timeVariance =
+      targetTime === 0 && actualTime === 0
+        ? null
+        : this.roundNumber(actualTime - targetTime, 1)
+
+    const evaluationWhere = this.buildEvaluationWhereClause(filters)
+    const evaluationClause = `${evaluationWhere.clause} AND DATE(COALESCE(e."UPDATED_AT", e."CREATED_AT")) = CURRENT_DATE`
+    const evaluationSql = `
+      SELECT
+        SUM(
+          CASE WHEN e."OVERALL_SCORE" IS NOT NULL THEN 1 ELSE 0 END
+        )::int AS "COMPLETED_TODAY"
+      FROM public."EVALUATION" e
+      ${evaluationClause}
+    `
+    const evaluationQuery = preparePostgresQuery(
+      evaluationSql,
+      evaluationWhere.params
+    )
+    const [evaluationRow] = await queryRunner<{
+      COMPLETED_TODAY: number
+    }>(evaluationQuery.query, evaluationQuery.values)
+
+    const activitySql = `
+      SELECT COUNT(*)::int AS "COUNT"
+      FROM public."ACTIVITY_LOG" log
+      WHERE DATE(log."CREATED_AT") = CURRENT_DATE
+    `
+    const [activityRow] = await queryRunner<{
+      COUNT: number
+    }>(activitySql)
+
+    return {
+      date: new Date().toISOString(),
+      targetValue,
+      actualValue,
+      completionRate,
+      targetTime,
+      actualTime,
+      timeVariance,
+      activeGoals,
+      completedGoals,
+      evaluationsCompleted: Number(evaluationRow?.COMPLETED_TODAY ?? 0),
+      activityCount: Number(activityRow?.COUNT ?? 0),
+    }
   }
 
   private async getFilterOptions(): Promise<DashboardFilterOptions> {

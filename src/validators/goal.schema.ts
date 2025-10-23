@@ -3,6 +3,7 @@ import Joi from 'joi'
 const dailyTargetSchema = Joi.object({
   TARGET_DATE: Joi.date().required(),
   TARGET_VALUE: Joi.number().integer().min(0).required(),
+  TARGET_TIME: Joi.number().min(0).optional(),
 })
 
 export const createGoalSchema = Joi.object({
@@ -59,6 +60,7 @@ export const postProgressSchema = Joi.object({
   SCOPE: Joi.string().valid('individual', 'module').required(),
   PERIOD: Joi.number().integer().required(),
   ACTUAL_VALUE: Joi.number().integer().min(0).required(),
+  ACTUAL_TIME: Joi.number().min(0).optional(),
   STAFF_ID: Joi.number().integer().when('SCOPE', {
     is: 'individual',
     then: Joi.required(),
@@ -74,6 +76,7 @@ export const postProgressSchema = Joi.object({
       Joi.object({
         STAFF_ID: Joi.number().integer().required(),
         ACTUAL_VALUE: Joi.number().integer().min(0).required(),
+        ACTUAL_TIME: Joi.number().min(0).optional(),
       })
     )
     .when('SCOPE', {

@@ -32,7 +32,12 @@ export class User {
   @Column({ type: 'varchar', nullable: false, length: 25 })
   USERNAME: string
 
-  @Column({ name: 'PASSWORD_HASH', type: 'varchar', nullable: false, select: false })
+  @Column({
+    name: 'PASSWORD_HASH',
+    type: 'varchar',
+    nullable: false,
+    select: false,
+  })
   PASSWORD_HASH: string
 
   @Column({ type: 'text', nullable: true })
@@ -73,8 +78,4 @@ export class User {
 
   @Column({ type: 'integer', nullable: true })
   MODULE_ID: number
-
-  @ManyToOne(() => Module, (m) => m.MEMBERS)
-  @JoinColumn({ name: 'MODULE_ID' })
-  MODULE: Module
 }

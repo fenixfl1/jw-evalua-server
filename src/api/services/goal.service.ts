@@ -23,6 +23,7 @@ import { BadRequestError, NotFoundError } from '@src/errors/http.error'
 interface GoalDailyTargetPayload {
   TARGET_DATE: string | Date
   TARGET_VALUE: number
+  TARGET_TIME?: number | null
 }
 
 interface CreateGoalPayload extends Omit<Goal, 'DAILY_TARGETS'> {
@@ -46,6 +47,7 @@ interface AssignToModulePayload {
 interface ProgressContributionPayload {
   STAFF_ID: number
   ACTUAL_VALUE: number
+  ACTUAL_TIME?: number | null
 }
 
 interface PostProgressPayload {
@@ -53,6 +55,7 @@ interface PostProgressPayload {
   SCOPE: GoalScope
   PERIOD: number
   ACTUAL_VALUE: number
+  ACTUAL_TIME?: number | null
   STAFF_ID?: number
   MODULE_ID?: number
   CONTRIBUTIONS?: ProgressContributionPayload[]
@@ -139,10 +142,20 @@ export class GoalService extends BaseService {
       const dateEntries = targets.map((item) => {
         const normalizedDate = this.toDateOnly(item.TARGET_DATE)
         const period = this.getIsoWeekId(normalizedDate)
+        const targetValue = Number(item.TARGET_VALUE ?? 0)
+        const rawTargetTime =
+          item.TARGET_TIME === undefined || item.TARGET_TIME === null
+            ? null
+            : Number(item.TARGET_TIME)
+        const targetTime =
+          rawTargetTime !== null && Number.isFinite(rawTargetTime)
+            ? rawTargetTime
+            : null
         return {
           period,
           targetDate: normalizedDate.toISOString().slice(0, 10),
-          targetValue: Number(item.TARGET_VALUE ?? 0),
+          targetValue,
+          targetTime,
         }
       })
 
@@ -167,16 +180,18 @@ export class GoalService extends BaseService {
         .andWhere('PERIOD IN (:...periods)', { periods })
       await updateBuilder.execute()
 
-      const records = dateEntries.map(({ period, targetDate, targetValue }) =>
-        repository.create({
-          GOAL_MODULE_ID: goalModuleId,
-          PERIOD: period,
-          TARGET_DATE: targetDate,
-          TARGET_VALUE: targetValue,
-          CREATED_AT: now,
-          CREATED_BY: session.userId,
-          STATE: 'A',
-        } as never)
+      const records = dateEntries.map(
+        ({ period, targetDate, targetValue, targetTime }) =>
+          repository.create({
+            GOAL_MODULE_ID: goalModuleId,
+            PERIOD: period,
+            TARGET_DATE: targetDate,
+            TARGET_VALUE: targetValue,
+            TARGET_TIME: targetTime,
+            CREATED_AT: now,
+            CREATED_BY: session.userId,
+            STATE: 'A',
+          } as never)
       )
 
       await repository.save(records as never)
@@ -462,6 +477,7 @@ export class GoalService extends BaseService {
       SCOPE,
       PERIOD,
       ACTUAL_VALUE,
+      ACTUAL_TIME,
       STAFF_ID,
       MODULE_ID,
       CONTRIBUTIONS = [],
@@ -495,7 +511,7 @@ export class GoalService extends BaseService {
 
         if (!moduleAssignments.length && goal.SCOPE === GoalScope.MODULE) {
           throw new NotFoundError(
-            'La meta no está asignada a ningún módulo en el período indicado.'
+            'La meta no está asignada a ningún módulo en el peri­odo indicado.'
           )
         }
 
@@ -541,24 +557,60 @@ export class GoalService extends BaseService {
 
       if (!goalModuleAssignment) {
         throw new NotFoundError(
-          'La meta no está asignada al módulo indicado para el período especificado.'
+          'La meta no está asignada al módulo indicado para el peri­odo especificado.'
         )
       }
 
       moduleIdForProgress = MODULE_ID
     }
 
-    let sanitizedContributions: ProgressContributionPayload[] = []
+    const totalActualTime =
+      ACTUAL_TIME === undefined || ACTUAL_TIME === null
+        ? null
+        : Number(ACTUAL_TIME)
+
+    if (totalActualTime !== null) {
+      if (!Number.isFinite(totalActualTime)) {
+        throw new BadRequestError(
+          'El tiempo reportado debe ser un numero valido.'
+        )
+      }
+      if (totalActualTime < 0) {
+        throw new BadRequestError(
+          'El tiempo total reportado debe ser mayor o igual a cero.'
+        )
+      }
+    }
+
+    type SanitizedContribution = {
+      STAFF_ID: number
+      ACTUAL_VALUE: number
+      ACTUAL_TIME: number | null
+    }
+
+    let sanitizedContributions: SanitizedContribution[] = []
     if (SCOPE === GoalScope.MODULE) {
-      sanitizedContributions = CONTRIBUTIONS.map((item) => ({
-        STAFF_ID: Number(item?.STAFF_ID),
-        ACTUAL_VALUE: Number(item?.ACTUAL_VALUE ?? 0),
-      })).filter(
-        (item) =>
-          Number.isInteger(item.STAFF_ID) &&
-          Number.isInteger(item.ACTUAL_VALUE) &&
-          item.ACTUAL_VALUE >= 0
-      )
+      sanitizedContributions = CONTRIBUTIONS.map((item) => {
+        const actualTime =
+          item?.ACTUAL_TIME === undefined || item?.ACTUAL_TIME === null
+            ? null
+            : Number(item.ACTUAL_TIME)
+        return {
+          STAFF_ID: Number(item?.STAFF_ID),
+          ACTUAL_VALUE: Number(item?.ACTUAL_VALUE ?? 0),
+          ACTUAL_TIME: actualTime,
+        }
+      }).filter((item) => {
+        const hasValidId = Number.isInteger(item.STAFF_ID)
+        const hasValidValue =
+          Number.isInteger(item.ACTUAL_VALUE) && item.ACTUAL_VALUE >= 0
+        const hasValidTime =
+          item.ACTUAL_TIME === null ||
+          (typeof item.ACTUAL_TIME === 'number' &&
+            Number.isFinite(item.ACTUAL_TIME) &&
+            item.ACTUAL_TIME >= 0)
+        return hasValidId && hasValidValue && hasValidTime
+      })
 
       if (sanitizedContributions.length) {
         if (!moduleIdForProgress) {
@@ -593,6 +645,22 @@ export class GoalService extends BaseService {
             'La suma de los aportes debe coincidir con el valor total reportado.'
           )
         }
+
+        if (
+          totalActualTime !== null &&
+          sanitizedContributions.some((item) => item.ACTUAL_TIME !== null)
+        ) {
+          const contributionsTimeSum = sanitizedContributions.reduce(
+            (acc, item) => acc + (item.ACTUAL_TIME ?? 0),
+            0
+          )
+
+          if (Math.abs(contributionsTimeSum - totalActualTime) > 0.0001) {
+            throw new BadRequestError(
+              'La suma del tiempo de los aportes debe coincidir con el tiempo total reportado.'
+            )
+          }
+        }
       }
     }
 
@@ -608,6 +676,7 @@ export class GoalService extends BaseService {
         SCOPE,
         PERIOD,
         ACTUAL_VALUE,
+        ACTUAL_TIME: totalActualTime,
         STAFF_ID: SCOPE === GoalScope.INDIVIDUAL ? (STAFF_ID as number) : null,
         CREATED_AT: now,
         CREATED_BY: session.userId,
@@ -626,6 +695,7 @@ export class GoalService extends BaseService {
             PERIOD,
             STAFF_ID: item.STAFF_ID,
             ACTUAL_VALUE: item.ACTUAL_VALUE,
+            ACTUAL_TIME: item.ACTUAL_TIME,
             CREATED_AT: now,
             CREATED_BY: session.userId,
             STATE: 'A',
@@ -688,7 +758,7 @@ export class GoalService extends BaseService {
 
     const byGoal: Record<
       number,
-      { target: number; weight: number; actual: number }
+      { target: number; weight: number; actual: number; actualTime: number }
     > = {}
     for (const a of assignments) {
       const g = goals.find((x) => x.GOAL_ID === a.GOAL_ID)
@@ -697,11 +767,13 @@ export class GoalService extends BaseService {
         target: Number(a.TARGET_VALUE || 0),
         weight,
         actual: 0,
+        actualTime: 0,
       }
     }
     for (const p of progress) {
       if (!byGoal[p.GOAL_MODULE_ID]) continue
       byGoal[p.GOAL_MODULE_ID].actual += Number(p.ACTUAL_VALUE || 0)
+      byGoal[p.GOAL_MODULE_ID].actualTime += Number(p.ACTUAL_TIME ?? 0)
     }
 
     const details = Object.entries(byGoal).map(([goalId, v]) => {
@@ -711,17 +783,23 @@ export class GoalService extends BaseService {
         TARGET_VALUE: v.target,
         ACTUAL_VALUE: v.actual,
         WEIGHT: v.weight,
+        ACTUAL_TIME: v.actualTime,
         COMPLIANCE: compliance, // puede superar 100 para empleados
       }
     })
 
     const totalCompliance = details.reduce((acc, d) => acc + d.COMPLIANCE, 0)
+    const totalActualTime = details.reduce(
+      (acc, d) => acc + (d.ACTUAL_TIME ?? 0),
+      0
+    )
 
     return this.success({
       data: {
         STAFF_ID,
         PERIOD,
         TOTAL_COMPLIANCE: totalCompliance,
+        TOTAL_ACTUAL_TIME: totalActualTime,
         DETAILS: details,
       },
     })
@@ -736,7 +814,7 @@ export class GoalService extends BaseService {
   ): Promise<ApiResponse> {
     const { MODULE_ID, PERIOD } = payload
 
-    // 1) Trae asignaciones activas del período para el módulo
+    // 1) Trae asignaciones activas del perÃ­odo para el módulo
     const goalModules = await this.goalModuleRepository.find({
       where: { MODULE_ID, PERIOD, STATE: 'A' as never },
     })
@@ -769,14 +847,14 @@ export class GoalService extends BaseService {
           })
         : []
 
-    // 2) IDs de metas activas en el período
+    // 2) IDs de metas activas en el perÃ­odo
     const activeGoalIds = Array.from(
       new Set<number>([
         ...goalModules.map((module) => module.GOAL_ID),
         ...progress.map((item) => item.GOAL_ID),
       ])
     )
-    // 👉 Si quieres SOLO metas con asignación del período:
+    // ðŸ‘‰ Si quieres SOLO metas con asignación del perÃ­odo:
     // const activeGoalIds = Array.from(new Set(assignments.map(a => a.GOAL_ID)))
 
     if (activeGoalIds.length === 0) return this.noContent()
@@ -790,9 +868,14 @@ export class GoalService extends BaseService {
     const dailyTargetsByGoal = dailyTargets.reduce((acc, target) => {
       const goalId = moduleMap.get(target.GOAL_MODULE_ID)?.GOAL_ID
       if (!goalId) return acc
+      const targetTime =
+        target.TARGET_TIME === null || target.TARGET_TIME === undefined
+          ? null
+          : Number(target.TARGET_TIME)
       ;(acc[goalId] ||= []).push({
         TARGET_DATE: target.TARGET_DATE,
         TARGET_VALUE: Number(target.TARGET_VALUE ?? 0),
+        TARGET_TIME: targetTime,
       })
       return acc
     }, {} as Record<number, GoalDailyTargetPayload[]>)
@@ -806,39 +889,55 @@ export class GoalService extends BaseService {
         actual: number
         description: string
         state: string
+        targetTime: number
+        actualTime: number
       }
     > = {}
     for (const g of goals) {
       byGoal[g.GOAL_ID] = {
         target: 0,
-        weight: Number(g.WEIGHT ?? 0), // ✅ WEIGHT viene de GOAL
+        weight: Number(g.WEIGHT ?? 0), // Peso base tomado de GOAL
         actual: 0,
         description: g.DESCRIPTION,
         state: g.STATE,
+        targetTime: 0,
+        actualTime: 0,
       }
     }
 
-    // 5) Suma target por asignaciones del período
+    // 5) Acumula tiempo objetivo diario
+    for (const [goalId, targets] of Object.entries(dailyTargetsByGoal)) {
+      const entry = byGoal[Number(goalId)]
+      if (!entry) continue
+      entry.targetTime += targets.reduce(
+        (acc, item) => acc + Number(item.TARGET_TIME ?? 0),
+        0
+      )
+    }
+
+    // 6) Suma target por asignaciones del periodo
     for (const module of goalModules) {
       const entry = byGoal[module.GOAL_ID]
       if (!entry) continue
       entry.target += Number(module.TARGET_VALUE ?? 0)
     }
 
-    // 6) Suma actual por progreso del período
+    // 7) Suma actual por progreso del periodo
     for (const p of progress) {
       const entry = byGoal[p.GOAL_ID]
       if (!entry) continue
       entry.actual += Number(p.ACTUAL_VALUE ?? 0)
+      entry.actualTime += Number(p.ACTUAL_TIME ?? 0)
     }
 
-    // 7) Logs de progreso por meta
+    // 8) Logs de progreso por meta
     const progressByGoal = progress.reduce(
       (acc, item) => {
         const key = item.GOAL_ID
         ;(acc[key] ||= []).push({
           GOAL_PROGRESS_ID: item.GOAL_PROGRESS_ID,
           ACTUAL_VALUE: Number(item.ACTUAL_VALUE ?? 0),
+          ACTUAL_TIME: Number(item.ACTUAL_TIME ?? 0),
           CREATED_AT: item.CREATED_AT,
           UPDATED_AT: item.UPDATED_AT,
         })
@@ -849,13 +948,14 @@ export class GoalService extends BaseService {
         {
           GOAL_PROGRESS_ID: number
           ACTUAL_VALUE: number
+          ACTUAL_TIME: number
           CREATED_AT: Date | null
           UPDATED_AT: Date | null
         }[]
       >
     )
 
-    // 8) Detalles SOLO para metas activas del período
+    // 9) Detalles SOLO para metas activas del periodo
     const details = activeGoalIds
       .filter((id) => byGoal[id]) // por si alguna quedó fuera
       .map((id) => {
@@ -863,6 +963,10 @@ export class GoalService extends BaseService {
         const raw = entry.target > 0 ? entry.actual / entry.target : 0
         const capped = Math.min(raw, 1) // cap 100% por meta
         const compliance = capped * entry.weight
+        const timeRatio =
+          entry.targetTime > 0 ? entry.actualTime / entry.targetTime : null
+        const timeVariance =
+          entry.targetTime > 0 ? entry.actualTime - entry.targetTime : null
 
         const logs = [...(progressByGoal[id] ?? [])].sort((a, b) => {
           const ta = (a.CREATED_AT ?? a.UPDATED_AT)?.valueOf() ?? 0
@@ -882,6 +986,10 @@ export class GoalService extends BaseService {
           ACTUAL_VALUE: entry.actual,
           WEIGHT: entry.weight,
           COMPLIANCE: compliance,
+          TARGET_TIME: entry.targetTime,
+          ACTUAL_TIME: entry.actualTime,
+          TIME_EFFICIENCY: timeRatio !== null ? timeRatio * 100 : null,
+          TIME_VARIANCE: timeVariance,
           UPDATED_AT: lastUpdate || null,
           PROGRESS_LOGS: logs,
           DAILY_TARGETS: dailyTargetsByGoal[id] ?? [],
@@ -890,9 +998,24 @@ export class GoalService extends BaseService {
 
     const sum = details.reduce((acc, d) => acc + d.COMPLIANCE, 0)
     const TOTAL_COMPLIANCE = Math.min(sum, 100) // cap total 100%
+    const TOTAL_TARGET_TIME = details.reduce(
+      (acc, d) => acc + Number(d.TARGET_TIME ?? 0),
+      0
+    )
+    const TOTAL_ACTUAL_TIME = details.reduce(
+      (acc, d) => acc + Number(d.ACTUAL_TIME ?? 0),
+      0
+    )
 
     return this.success({
-      data: { MODULE_ID, PERIOD, TOTAL_COMPLIANCE, DETAILS: details },
+      data: {
+        MODULE_ID,
+        PERIOD,
+        TOTAL_COMPLIANCE,
+        TOTAL_TARGET_TIME,
+        TOTAL_ACTUAL_TIME,
+        DETAILS: details,
+      },
     })
   }
 
@@ -911,12 +1034,12 @@ export class GoalService extends BaseService {
     })
 
     const goals = await this.goalRepository.find({
+      order: { GOAL_ID: 'DESC' as never },
       where: {
         SCOPE: 'module' as never,
         STATE: 'A',
         GOAL_ID: In(goalModule.map((item) => item.GOAL_ID)),
       },
-      order: { GOAL_ID: 'DESC' as never },
     })
 
     if (!goals.length) return this.noContent()
@@ -952,7 +1075,8 @@ export class GoalService extends BaseService {
           gdt."GOAL_MODULE_ID",
           gdt."PERIOD",
           gdt."TARGET_DATE",
-          SUM(gdt."TARGET_VALUE") AS "TARGET_VALUE"
+          SUM(gdt."TARGET_VALUE") AS "TARGET_VALUE",
+          SUM(COALESCE(gdt."TARGET_TIME", 0)) AS "TARGET_TIME"
         FROM public."GOAL_DAILY_TARGET" gdt
         WHERE gdt."STATE" = 'A'
         GROUP BY gdt."GOAL_MODULE_ID", gdt."PERIOD", gdt."TARGET_DATE"
@@ -963,6 +1087,7 @@ export class GoalService extends BaseService {
           gp."PERIOD",
           DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "TARGET_DATE",
           SUM(gp."ACTUAL_VALUE") AS "ACTUAL_VALUE",
+          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME",
           MAX(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "LAST_UPDATE"
         FROM public."GOAL_PROGRESS" gp
         WHERE gp."STATE" = 'A'
@@ -983,7 +1108,9 @@ export class GoalService extends BaseService {
           m."PERIOD",
           t."TARGET_DATE",
           t."TARGET_VALUE",
+          t."TARGET_TIME",
           COALESCE(p."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
+          COALESCE(p."ACTUAL_TIME", 0) AS "ACTUAL_TIME",
           p."LAST_UPDATE"
         FROM MODULES m
         JOIN TARGET t
@@ -1007,7 +1134,18 @@ export class GoalService extends BaseService {
             ),
             2
           )
-        END AS "COMPLIANCE"
+        END AS "COMPLIANCE",
+        CASE
+          WHEN sub."TARGET_TIME_ACC" = 0 THEN NULL
+          ELSE ROUND(
+            COALESCE(sub."ACTUAL_TIME_ACC", 0)::decimal
+            / NULLIF(sub."TARGET_TIME_ACC", 0)
+            * 100,
+            2
+          )
+        END AS "TIME_EFFICIENCY",
+        COALESCE(sub."ACTUAL_TIME", 0) - COALESCE(sub."TARGET_TIME", 0) AS "TIME_VARIANCE",
+        COALESCE(sub."ACTUAL_TIME_ACC", 0) - COALESCE(sub."TARGET_TIME_ACC", 0) AS "TIME_VARIANCE_ACC"
       FROM (
         SELECT
           d."GOAL_MODULE_ID",
@@ -1019,9 +1157,13 @@ export class GoalService extends BaseService {
           d."PERIOD",
           d."TARGET_DATE",
           d."TARGET_VALUE",
+          d."TARGET_TIME",
           d."ACTUAL_VALUE",
+          d."ACTUAL_TIME",
           SUM(d."TARGET_VALUE") OVER w AS "TARGET_VALUE_ACC",
+          SUM(d."TARGET_TIME") OVER w AS "TARGET_TIME_ACC",
           SUM(d."ACTUAL_VALUE") OVER w AS "ACTUAL_VALUE_ACC",
+          SUM(d."ACTUAL_TIME") OVER w AS "ACTUAL_TIME_ACC",
           d."LAST_UPDATE" AS "UPDATED_AT",
           d."DESCRIPTION" || ' ' || d."GOAL_ID" || ' ' ||
             to_char(d."TARGET_DATE", 'YYYY-MM-DD') AS "FILTER"
