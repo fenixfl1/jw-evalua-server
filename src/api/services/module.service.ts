@@ -11,7 +11,6 @@ import {
 import { NotFoundError } from '@src/errors/http.error'
 import { whereClauseBuilder } from '@src/helpers/where-clause-builder'
 import { paginatedQuery, queryRunner } from '@src/helpers/query-utils'
-import { HTTP_STATUS_NO_CONTENT } from '@src/constants/status-codes'
 import { StaffModule } from '@src/entity/StaffXModule'
 import { Staff } from '@src/entity/Staff'
 import { publishEmailToQueue } from './email/email-producer.service'
