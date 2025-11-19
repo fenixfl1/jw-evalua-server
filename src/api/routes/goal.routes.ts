@@ -10,6 +10,7 @@ import {
   PATH_POST_GOAL_PROGRESS,
   PATH_GET_GOALS_BY_MODULE,
   PATH_GET_GOAL_PAGINATION,
+  PATH_GET_GOAL_MODULE_TASKS,
 } from '@src/constants/routes'
 import {
   assignGoalModuleSchema,
@@ -30,6 +31,7 @@ import {
   getGoalsByModuleController,
   getGoalsPaginationController,
   updateController,
+  getGoalModuleTasksController,
 } from '../controllers/goal.controller'
 
 const goalRouter = Router()
@@ -72,6 +74,7 @@ goalRouter.post(
   getGoalsPaginationController
 )
 
+goalRouter.get(PATH_GET_GOAL_MODULE_TASKS, getGoalModuleTasksController)
 goalRouter.get(PATH_GET_GOALS_BY_MODULE, getGoalsByModuleController)
 
 export default goalRouter

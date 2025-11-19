@@ -34,6 +34,13 @@ export const PATH_GET_GOAL_SUMMARY_MODULE =
 export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION =
   '/goal/summary/module/pagination'
 export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId/:period'
+export const PATH_GET_GOAL_MODULE_TASKS = '/goal/module/:moduleId/tasks'
+export const PATH_POST_MODULE_EFFICIENCY = '/module/efficiency'
+export const PATH_GET_MODULE_EFFICIENCY = '/module/:moduleId/efficiency'
+export const PATH_GET_MODULE_WORKED_MINUTES =
+  '/module/:moduleId/efficiency/worked-minutes'
+export const PATH_POST_PROCESS_AUDIT = '/audits/process'
+export const PATH_GET_PROCESS_AUDIT = '/audits/process'
 
 // Competencies
 export const PATH_GET_COMPETENCIES = '/competency'
@@ -48,3 +55,5 @@ export const PATH_CHECK_EVALUATION_AVAILABILITY = '/evaluation/availability'
 // Dashboard
 export const PATH_GET_DASHBOARD_SUMMARY = '/dashboard/summary'
 export const PATH_GET_DASHBOARD_ACTIVITY = '/dashboard/activity'
+export const PATH_GET_WORKED_HOURS_BY_MODULE = '/dashboard/worked-hours/modules'
+export const PATH_GET_WORKED_HOURS_BY_STAFF = '/dashboard/worked-hours/staff'

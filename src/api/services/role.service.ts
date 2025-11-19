@@ -217,6 +217,7 @@ export class RoleService extends BaseService {
         LEFT JOIN public."STAFF" s ON s."STAFF_ID" = u."STAFF_ID"
       ) AS subquery
       ${whereClause}
+      ORDER BY "ROLE_ID"
     `
 
     const [data = [], metadata] = await paginatedQuery({

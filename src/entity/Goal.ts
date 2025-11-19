@@ -3,6 +3,7 @@ import { BaseEntity } from './BaseEntity'
 import { GoalStaff } from './GoalStaff'
 import { GoalModule } from './GoalModule'
 import { GoalScope } from './goal-scope.enum'
+import { GoalTask } from './GoalTask'
 
 const numericTransformer = {
   to: (value?: number | null) => value,
@@ -45,4 +46,7 @@ export class Goal extends BaseEntity {
 
   @OneToMany(() => GoalModule, (goalModule) => goalModule.GOAL)
   MODULES: GoalModule[]
+
+  @OneToMany(() => GoalTask, (goalTask) => goalTask.GOAL)
+  TASKS: GoalTask[]
 }

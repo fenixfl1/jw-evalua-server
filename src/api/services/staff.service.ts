@@ -109,30 +109,27 @@ export class StaffService extends BaseService {
     const { values, whereClause } = whereClauseBuilder(payload)
 
     const statement = `
-      select
+      SELECT
         *
-      from
+      FROM
         (
-          select
-            s.*,
-            u."USER_ID",
-            u."USERNAME",
-            u."IS_ACTIVE",
-            m."DESCRIPTION" "DESC_MODULE",
-            m."STATE" "MODULE_STATE",
-            s."NAME" || ' ' 
-            || s."LAST_NAME" || ' ' 
-            || s."IDENTITY_DOCUMENT" || ' ' 
-            || s."PHONE" || ' ' 
-            || s."EMAIL" || ' '
-            || u."USERNAME"  "FILTER"
-          from
-            public."STAFF" s
-            LEFT JOIN public."USERS" u ON u."STAFF_ID" = s."STAFF_ID"
-            LEFT JOIN public."MODULE" m ON m."MODULE_ID" = s."MODULE_ID"
-          order by
-            s."STAFF_ID"
-        ) subquery
+          SELECT
+            S.*,
+            U."USER_ID",
+            U."USERNAME",
+            U."IS_ACTIVE",
+            M."DESCRIPTION" "DESC_MODULE",
+            M."STATE" "MODULE_STATE",
+            rxs."ROLE_ID",
+            S."NAME" || ' ' || S."LAST_NAME" || ' ' || S."IDENTITY_DOCUMENT" || ' ' || S."PHONE" || ' ' || S."EMAIL" || ' ' || U."USERNAME" "FILTER"
+          FROM
+            PUBLIC."STAFF" S
+            LEFT JOIN PUBLIC."USERS" U ON U."STAFF_ID" = S."STAFF_ID"
+            LEFT JOIN PUBLIC."MODULE" M ON M."MODULE_ID" = S."MODULE_ID"
+            LEFT JOIN public."ROLES_X_USER" rxs ON rxs."USER_ID" = u."USER_ID" AND rxs."STATE" = 'A'
+          ORDER BY
+            S."STAFF_ID"
+        ) SUBQUERY
       ${whereClause}
     `
 

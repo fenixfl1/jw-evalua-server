@@ -6,6 +6,18 @@ const dailyTargetSchema = Joi.object({
   TARGET_TIME: Joi.number().min(0).optional(),
 })
 
+const taskStaffSchema = Joi.object({
+  STAFF_ID: Joi.number().integer().required(),
+  TARGET: Joi.number().integer().min(1).required(),
+})
+
+const goalTaskSchema = Joi.object({
+  DESCRIPTION: Joi.string().max(100).required(),
+  COMMENT: Joi.string().max(500).allow('', null).optional(),
+  TARGET: Joi.number().integer().min(1).required(),
+  STAFF: Joi.array().items(taskStaffSchema).min(1).required(),
+})
+
 export const createGoalSchema = Joi.object({
   MODULE_ID: Joi.number().integer().optional(),
   TARGET_VALUE: Joi.number().integer().optional(),
@@ -51,8 +63,9 @@ export const assignGoalModuleSchema = Joi.object({
   GOAL_ID: Joi.number().integer().required(),
   MODULE_ID: Joi.number().integer().required(),
   PERIOD: Joi.number().integer().required(),
-  TARGET_VALUE: Joi.number().integer().min(0).required(),
+  TARGET_VALUE: Joi.number().integer().min(1).required(),
   DAILY_TARGETS: Joi.array().items(dailyTargetSchema).min(1).required(),
+  TASKS: Joi.array().items(goalTaskSchema).min(1).required(),
 })
 
 export const postProgressSchema = Joi.object({

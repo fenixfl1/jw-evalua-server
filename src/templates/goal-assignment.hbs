@@ -12,9 +12,15 @@
       text-align: center; } .tag { display: inline-block; padding: 6px 10px;
       border-radius: 16px; background-color: #f0f5ff; color: #0050b3;
       font-size: 12px; margin-bottom: 12px; text-transform: uppercase;
-      letter-spacing: 0.8px; } .metric { font-size: 16px; margin: 6px 0; }
-      .metric span { display: inline-block; min-width: 160px; font-weight:
-      bold; } a { color: #0050b3; }
+      letter-spacing: 0.8px; } .metric { font-size: 16px; margin: 6px 0;
+      display: flex; gap: 4px; flex-wrap: wrap; } .metric span { display:
+      inline-block; min-width: 160px; font-weight: bold; } .task-list { list-style:
+      none; padding: 0; margin: 0; } .task-item { padding: 12px 0; border-bottom:
+      1px solid #f0f0f0; } .task-item:last-child { border-bottom: none; }
+      .task-title { font-weight: bold; font-size: 15px; } .task-comment {
+      color: #595959; font-size: 14px; margin-top: 4px; } .task-target {
+      font-size: 14px; margin-top: 6px; color: #0050b3; font-weight: bold; }
+      a { color: #0050b3; }
     </style>
   </head>
   <body>
@@ -49,6 +55,24 @@
           Meta {{goalid}} - Modulo {{moduleid}}
         </div>
       </div>
+      {{#if taskassignments}}
+        <div class='section'>
+          <p>Tareas asignadas:</p>
+          <ul class='task-list'>
+            {{#each taskassignments}}
+              <li class='task-item'>
+                <div class='task-title'>{{description}}</div>
+                {{#if comment}}
+                  <div class='task-comment'>{{comment}}</div>
+                {{/if}}
+                <div class='task-target'>
+                  Objetivo: {{targetformatted}} unidades
+                </div>
+              </li>
+            {{/each}}
+          </ul>
+        </div>
+      {{/if}}
       {{#if supervisorname}}
         <div class='section'>
           <p>

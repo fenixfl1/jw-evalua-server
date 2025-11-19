@@ -11,6 +11,7 @@ import { Goal } from './Goal'
 import { Module } from './Module'
 import { GoalDailyTarget } from './GoalDailyTarget'
 import { GoalProgress } from './GoalProgress'
+import { GoalTask } from './GoalTask'
 
 const numericTransformer = {
   to: (value?: number | null) => value,
@@ -52,4 +53,7 @@ export class GoalModule extends BaseEntity {
 
   @OneToMany(() => GoalDailyTarget, (dailyTarget) => dailyTarget.GOAL_MODULE)
   DAILY_TARGETS: GoalDailyTarget[]
+
+  @OneToMany(() => GoalTask, (task) => task.GOAL_MODULE)
+  TASKS: GoalTask[]
 }

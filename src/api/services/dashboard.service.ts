@@ -2,6 +2,10 @@ import { BaseService, CatchServiceError } from './base.service'
 import { ApiResponse, Metadata, Pagination } from '@src/types/api.types'
 import { preparePostgresQuery } from '@src/api/middlewares/prepare-postgres-query'
 import { getQueryMetadata, queryRunner } from '@src/helpers/query-utils'
+import { GoalTaskSession } from '@src/entity/GoalTaskSession'
+import { Repository } from 'typeorm'
+import { Staff } from '@src/entity/Staff'
+import { Module } from '@src/entity/Module'
 
 interface DashboardSummaryFilters {
   moduleId?: number
@@ -175,6 +179,25 @@ interface GoalTimeInsights {
   averageActualTime: number | null
 }
 
+interface WorkedHoursModule {
+  moduleId: number | null
+  moduleName: string
+  secondsWorked: number
+  hoursWorked: number
+  activeSessions: number
+  staffCount: number
+}
+
+interface WorkedHoursStaff {
+  staffId: number
+  staffName: string
+  moduleId: number | null
+  moduleName: string
+  secondsWorked: number
+  hoursWorked: number
+  activeSessions: number
+}
+
 interface EmployeeProductivityEntry {
   staffId: number | null
   staffName: string
@@ -264,6 +287,9 @@ interface ActivityLogResult {
 }
 
 export class DashboardService extends BaseService {
+  private goalTaskSessionRepository = this.dataSource.getRepository(GoalTaskSession)
+  private moduleRepository = this.dataSource.getRepository(Module)
+
   @CatchServiceError()
   async getSummary(
     filters: DashboardSummaryFilters
@@ -324,6 +350,146 @@ export class DashboardService extends BaseService {
       data: { items },
       metadata,
     })
+  }
+
+  @CatchServiceError()
+  async getWorkedHoursByModule(
+    period?: number
+  ): Promise<ApiResponse<WorkedHoursModule[]>> {
+    const sessions = await this.loadSessions({ period })
+
+    const moduleMap = new Map<
+      number | null,
+      { seconds: number; activeSessions: number; staff: Set<number> }
+    >()
+
+    sessions.forEach(({ session, seconds }) => {
+      const moduleId = session.MODULE_ID ?? session.GOAL_MODULE_ID ?? null
+      const existing =
+        moduleMap.get(moduleId) ??
+        (() => {
+          const entry = { seconds: 0, activeSessions: 0, staff: new Set<number>() }
+          moduleMap.set(moduleId, entry)
+          return entry
+        })()
+
+      existing.seconds += seconds
+      if (session.IS_ACTIVE) existing.activeSessions += 1
+      if (session.STAFF_ID) existing.staff.add(session.STAFF_ID)
+    })
+
+    const moduleIds = Array.from(moduleMap.keys()).filter(
+      (id): id is number => id !== null && Number.isInteger(id)
+    )
+    const modules = moduleIds.length
+      ? await this.moduleRepository.findBy({ MODULE_ID: moduleIds as number[] } as never)
+      : []
+    const moduleNameMap = new Map<number, string>(
+      modules.map((m) => [m.MODULE_ID, m.DESCRIPTION])
+    )
+
+    const result: WorkedHoursModule[] = Array.from(moduleMap.entries()).map(
+      ([moduleId, info]) => {
+        const hoursWorked = Number((info.seconds / 3600).toFixed(2))
+
+        return {
+          moduleId,
+          moduleName:
+            moduleId !== null && moduleNameMap.get(moduleId)
+              ? moduleNameMap.get(moduleId)!
+              : 'Sin módulo',
+          secondsWorked: Number(info.seconds.toFixed(2)),
+          hoursWorked,
+          activeSessions: info.activeSessions,
+          staffCount: info.staff.size,
+        }
+      }
+    )
+
+    const sorted = result.sort((a, b) => b.hoursWorked - a.hoursWorked)
+    return this.success({ data: sorted })
+  }
+
+  @CatchServiceError()
+  async getWorkedHoursByStaff(
+    period?: number,
+    moduleId?: number
+  ): Promise<ApiResponse<WorkedHoursStaff[]>> {
+    const sessions = await this.loadSessions({ period, moduleId })
+
+    const staffMap = new Map<
+      number,
+      { seconds: number; activeSessions: number; moduleId: number | null }
+    >()
+
+    sessions.forEach(({ session, seconds }) => {
+      if (!session.STAFF_ID) return
+      const existing =
+        staffMap.get(session.STAFF_ID) ??
+        (() => {
+          const entry = {
+            seconds: 0,
+            activeSessions: 0,
+            moduleId: session.MODULE_ID ?? session.GOAL_MODULE_ID ?? null,
+          }
+          staffMap.set(session.STAFF_ID, entry)
+          return entry
+        })()
+
+      existing.seconds += seconds
+      if (session.IS_ACTIVE) existing.activeSessions += 1
+      if (session.MODULE_ID && !existing.moduleId) {
+        existing.moduleId = session.MODULE_ID
+      }
+    })
+
+    if (!staffMap.size) {
+      return this.success({ data: [] })
+    }
+
+    const staffIds = Array.from(staffMap.keys())
+    const staffRecords = await this.staffRepository.findBy({
+      STAFF_ID: staffIds as number[],
+    } as never)
+
+    const moduleIds = Array.from(
+      new Set(
+        Array.from(staffMap.values())
+          .map((v) => v.moduleId)
+          .filter(Boolean)
+      )
+    ) as number[]
+    const modules = moduleIds.length
+      ? await this.moduleRepository.findBy({ MODULE_ID: moduleIds } as never)
+      : []
+    const moduleNameMap = new Map<number, string>(
+      modules.map((m) => [m.MODULE_ID, m.DESCRIPTION])
+    )
+
+    const result: WorkedHoursStaff[] = staffIds.map((id) => {
+      const stats = staffMap.get(id)!
+      const staff = staffRecords.find((s) => s.STAFF_ID === id)
+      const hoursWorked = Number((stats.seconds / 3600).toFixed(2))
+      const moduleName =
+        stats.moduleId && moduleNameMap.get(stats.moduleId)
+          ? moduleNameMap.get(stats.moduleId)!
+          : 'Sin módulo'
+
+      return {
+        staffId: id,
+        staffName: staff
+          ? `${staff.NAME} ${staff.LAST_NAME}`
+          : `Operario ${id}`,
+        moduleId: stats.moduleId,
+        moduleName,
+        secondsWorked: Number(stats.seconds.toFixed(2)),
+        hoursWorked,
+        activeSessions: stats.activeSessions,
+      }
+    })
+
+    const sorted = result.sort((a, b) => b.hoursWorked - a.hoursWorked)
+    return this.success({ data: sorted })
   }
 
   private normalizeFilters(
@@ -1346,6 +1512,8 @@ export class DashboardService extends BaseService {
           pendingGoals: entry.pendingGoals,
           totalTargetTime: this.roundNumber(entry.totalTargetTime),
           totalActualTime: this.roundNumber(entry.totalActualTime),
+          totalTargetValue: this.roundNumber(entry.totalTargetValue),
+          totalActualValue: this.roundNumber(entry.totalActualValue),
           averageTargetTime,
           averageActualTime,
           averageTimeVariance,
@@ -1976,6 +2144,39 @@ export class DashboardService extends BaseService {
     )
 
     return { items, metadata }
+  }
+
+  private async loadSessions(filters: {
+    period?: number
+    moduleId?: number
+  }): Promise<{ session: GoalTaskSession; seconds: number }[]> {
+    const qb = this.goalTaskSessionRepository
+      .createQueryBuilder('session')
+      .where('session."STATE" = :state', { state: 'A' })
+
+    if (Number.isInteger(filters.period)) {
+      qb.andWhere('session."PERIOD" = :period', { period: filters.period })
+    }
+    if (Number.isInteger(filters.moduleId)) {
+      qb.andWhere('session."MODULE_ID" = :moduleId', {
+        moduleId: filters.moduleId,
+      })
+    }
+
+    const records = await qb.getMany()
+    const now = new Date()
+
+    return records.map((session) => {
+      let seconds = Number(session.ACCUMULATED_SECONDS ?? 0)
+      if (session.IS_ACTIVE) {
+        const resumed = session.LAST_RESUMED_AT ?? session.STARTED_AT
+        if (resumed) {
+          seconds += Math.max(0, (now.getTime() - resumed.getTime()) / 1000)
+        }
+      }
+
+      return { session, seconds }
+    })
   }
 
   private normalizeModuleName(name?: string | null): string {

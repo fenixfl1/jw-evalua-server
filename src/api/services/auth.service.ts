@@ -12,6 +12,8 @@ import PasswordResetToken from '@src/entity/PasswordReset'
 import { randomBytes } from 'crypto'
 import { Repository } from 'typeorm'
 import { generatePassword } from '@src/helpers/generate-password'
+import { Role } from '@src/entity/Role'
+import { UserRoles } from '@src/entity/RolesUser'
 
 interface LoginPayload {
   username: string
@@ -19,10 +21,14 @@ interface LoginPayload {
 }
 
 export class AuthService extends BaseService {
+  private roleRepository: Repository<Role>
+  private userRoleRepository: Repository<UserRoles>
   private resetPasswordRepository: Repository<PasswordResetToken>
 
   constructor() {
     super()
+    this.userRoleRepository = this.dataSource.getRepository(UserRoles)
+    this.roleRepository = this.dataSource.getRepository(Role)
     this.resetPasswordRepository =
       this.dataSource.getRepository(PasswordResetToken)
   }
@@ -31,12 +37,27 @@ export class AuthService extends BaseService {
     const user = await this.userRepository
       .createQueryBuilder('U')
       .addSelect('U.PASSWORD_HASH')
-      .where('U.USERNAME = :username ', { username })
       .leftJoinAndSelect('U.STAFF', 'STAFF')
+      .where('U.USERNAME = :username', { username })
       .getOne()
 
     if (!user) {
       throw new UnAuthorizedError('Usuario o contraseña incorrectos')
+    }
+
+    const [role] = await this.userRoleRepository.find({
+      select: ['ROLE_ID'],
+      where: {
+        USER_ID: user.USER_ID,
+        STATE: 'A',
+      },
+    })
+
+    if (!role) {
+      throw new UnAuthorizedError(
+        'No puedo iniciar sesión porque aún no tiene un rol asignado.\
+         Póngase en contacto con el equipo de soporte.'
+      )
     }
 
     const business = await this.getBusinessInfo([
@@ -77,6 +98,7 @@ export class AuthService extends BaseService {
     return this.success({
       data: {
         username,
+        roleId: String(role.ROLE_ID),
         userId: user.USER_ID,
         name: `${user.STAFF.NAME} ${user.STAFF.LAST_NAME}`,
         avatar: user.AVATAR,

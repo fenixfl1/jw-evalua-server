@@ -9,6 +9,8 @@ import { Module } from '@src/entity/Module'
 import { Staff } from '@src/entity/Staff'
 import { StaffModule } from '@src/entity/StaffXModule'
 import { GoalDailyTarget } from '@src/entity/GoalDailyTarget'
+import { GoalTask } from '@src/entity/GoalTask'
+import { GoalTaskStaff } from '@src/entity/GoalTaskStaff'
 import { publishEmailToQueue } from './email/email-producer.service'
 import {
   AdvancedCondition,
@@ -42,6 +44,33 @@ interface AssignToModulePayload {
   PERIOD: number
   TARGET_VALUE: number
   DAILY_TARGETS?: GoalDailyTargetPayload[]
+  TASKS: GoalTaskPayloadInput[]
+}
+
+interface GoalTaskStaffPayload {
+  STAFF_ID: number
+  TARGET: number
+}
+
+interface GoalTaskPayloadInput {
+  DESCRIPTION: string
+  COMMENT?: string | null
+  TARGET: number
+  STAFF: GoalTaskStaffPayload[]
+}
+
+type SanitizedGoalTaskPayload = {
+  DESCRIPTION: string
+  COMMENT: string | null
+  TARGET: number
+  UNITS_PER_ITEM: number
+  STAFF: GoalTaskStaffPayload[]
+}
+
+type StaffTaskNotification = {
+  description: string
+  comment: string | null
+  target: number
 }
 
 interface ProgressContributionPayload {
@@ -250,7 +279,7 @@ export class GoalService extends BaseService {
     payload: AssignToModulePayload,
     session: SessionInfo
   ): Promise<ApiResponse> {
-    const { GOAL_ID, MODULE_ID, PERIOD, TARGET_VALUE } = payload
+    const { GOAL_ID, MODULE_ID, PERIOD, TARGET_VALUE, TASKS } = payload
     const goal = await this.goalRepository.findOne({ where: { GOAL_ID } })
     if (!goal) throw new NotFoundError('Meta no encontrada.')
 
@@ -270,8 +299,8 @@ export class GoalService extends BaseService {
       throw new BadRequestError('El objetivo debe ser un numero valido.')
     }
 
-    if (TARGET_VALUE < 0) {
-      throw new BadRequestError('El objetivo debe ser mayor o igual a cero.')
+    if (TARGET_VALUE <= 0) {
+      throw new BadRequestError('El objetivo debe ser mayor a cero.')
     }
 
     if (!Number.isInteger(TARGET_VALUE)) {
@@ -287,19 +316,36 @@ export class GoalService extends BaseService {
       )
     }
 
-    const distributedTargets = this.distributeTarget(
-      TARGET_VALUE,
-      activeMembers.length
+    const memberMap = new Map(
+      activeMembers.map((staff) => [staff.STAFF_ID, staff])
     )
-    const staffTargets = activeMembers.map((staff, index) => ({
-      staff,
-      target: distributedTargets[index] ?? 0,
-    }))
+    const sanitizedTasks = this.sanitizeTaskPayloads(TASKS, memberMap)
+    const staffTaskAssignments =
+      this.buildStaffTaskAssignments(sanitizedTasks)
+
+    const staffTotals = this.aggregateTargetsByStaff(sanitizedTasks)
+    if (!staffTotals.size) {
+      throw new BadRequestError(
+        'Debe asignar al menos un objetivo a los operadores del módulo.'
+      )
+    }
+
+    const staffTargets = Array.from(staffTotals.entries())
+      .map(([staffId, target]) => {
+        const staff = memberMap.get(staffId)
+        if (!staff) {
+          return null
+        }
+        return { staff, target }
+      })
+      .filter(Boolean) as { staff: Staff; target: number }[]
     const now = new Date()
 
     await this.dataSource.transaction(async (manager) => {
       const goalModuleRepo = manager.getRepository(GoalModule)
       const goalStaffRepo = manager.getRepository(GoalStaff)
+      const goalTaskRepo = manager.getRepository(GoalTask)
+      const goalTaskStaffRepo = manager.getRepository(GoalTaskStaff)
 
       const record = goalModuleRepo.create({
         GOAL_ID,
@@ -322,23 +368,56 @@ export class GoalService extends BaseService {
         )
       }
 
-      try {
-        const staffAssignments = activeMembers.map((staff, index) =>
-          goalStaffRepo.create({
-            GOAL_ID,
-            STAFF_ID: staff.STAFF_ID,
-            PERIOD,
-            TARGET_VALUE: distributedTargets[index],
-            WEIGHT: goal.WEIGHT as never,
+      const taskEntities = sanitizedTasks.map((task) =>
+        goalTaskRepo.create({
+          GOAL_ID,
+          GOAL_MODULE_ID: record.GOAL_MODULE_ID,
+          DESCRIPTION: task.DESCRIPTION,
+          COMMENT: task.COMMENT,
+          TARGET: task.TARGET,
+          UNITS_PER_ITEM: task.UNITS_PER_ITEM,
+          CREATED_AT: now,
+          CREATED_BY: session.userId,
+          STATE: 'A',
+        })
+      )
+
+      const savedTasks = await goalTaskRepo.save(taskEntities)
+
+      const taskAssignments = savedTasks.flatMap((savedTask, index) => {
+        const taskPayload = sanitizedTasks[index]
+        return taskPayload.STAFF.map((assignment) =>
+          goalTaskStaffRepo.create({
+            GOAL_TASK_ID: savedTask.GOAL_TASK_ID,
+            STAFF_ID: assignment.STAFF_ID,
+            TARGET: assignment.TARGET,
             CREATED_AT: now,
             CREATED_BY: session.userId,
             STATE: 'A',
           })
         )
+      })
 
+      if (taskAssignments.length) {
+        await goalTaskStaffRepo.save(taskAssignments)
+      }
+
+      const staffAssignments = Array.from(staffTotals.entries()).map(
+        ([staffId, target]) =>
+          goalStaffRepo.create({
+            GOAL_ID,
+            STAFF_ID: staffId,
+            PERIOD,
+            TARGET_VALUE: target,
+            WEIGHT: goal.WEIGHT as never,
+            CREATED_AT: now,
+            CREATED_BY: session.userId,
+            STATE: 'A',
+          })
+      )
+
+      if (staffAssignments.length) {
         await goalStaffRepo.save(staffAssignments)
-      } catch (error) {
-        throw error
       }
     })
 
@@ -348,9 +427,10 @@ export class GoalService extends BaseService {
       period: PERIOD,
       totalTarget: TARGET_VALUE,
       staffTargets,
+      staffTasks: staffTaskAssignments,
     })
 
-    return this.success({ message: 'Meta asignada al modulo con éxito.' })
+    return this.success({ message: 'Meta y tareas asignadas con éxito.' })
   }
 
   private async getActiveModuleMembers(moduleId: number): Promise<Staff[]> {
@@ -377,20 +457,6 @@ export class GoalService extends BaseService {
     })
   }
 
-  private distributeTarget(total: number, size: number): number[] {
-    if (size <= 0) {
-      return []
-    }
-
-    const base = Math.floor(total / size)
-    const remainder = total % size
-
-    return Array.from({ length: size }, (_, index) => {
-      const extra = index < remainder ? 1 : 0
-      return base + extra
-    })
-  }
-
   private formatNumber(value: number): string {
     const numeric = Number.isFinite(value) ? Number(value) : 0
     return numeric.toLocaleString('es-DO', { maximumFractionDigits: 0 })
@@ -403,18 +469,42 @@ export class GoalService extends BaseService {
     return `Semana ${week} - ${year}`
   }
 
+  private buildStaffTaskAssignments(
+    tasks: SanitizedGoalTaskPayload[]
+  ): Map<number, StaffTaskNotification[]> {
+    const assignments = new Map<number, StaffTaskNotification[]>()
+
+    tasks.forEach((task) => {
+      task.STAFF.forEach((member) => {
+        if (!assignments.has(member.STAFF_ID)) {
+          assignments.set(member.STAFF_ID, [])
+        }
+
+        assignments.get(member.STAFF_ID)!.push({
+          description: task.DESCRIPTION,
+          comment: task.COMMENT,
+          target: member.TARGET,
+        })
+      })
+    })
+
+    return assignments
+  }
+
   private async notifyGoalAssignment({
     goal,
     module,
     period,
     totalTarget,
     staffTargets,
+    staffTasks,
   }: {
     goal: Goal
     module: Module
     period: number
     totalTarget: number
     staffTargets: { staff: Staff; target: number }[]
+    staffTasks: Map<number, StaffTaskNotification[]>
   }): Promise<void> {
     if (!staffTargets.length) {
       return
@@ -440,11 +530,34 @@ export class GoalService extends BaseService {
         const individualTarget = Number.isFinite(target) ? target : 0
         const individualTargetFormatted = this.formatNumber(individualTarget)
 
+        const rawTasks = staffTasks.get(staff.STAFF_ID) ?? []
+        const tasksForTemplate = rawTasks.map((task) => ({
+          description: task.description,
+          comment: task.comment,
+          target: task.target,
+          targetFormatted: this.formatNumber(task.target),
+        }))
+        const hasTasks = tasksForTemplate.length > 0
+
+        const tasksSummary = hasTasks
+          ? tasksForTemplate
+              .map(
+                (task) =>
+                  `${task.description} (${task.targetFormatted ?? task.target} unidades)`
+              )
+              .join('; ')
+          : ''
+
+        const baseText = `Hola ${staffName}, se ha definido la meta "${goal.DESCRIPTION}" para el módulo ${module.DESCRIPTION} durante ${periodLabel}. Tu objetivo asignado es ${individualTargetFormatted}.`
+        const textBody = hasTasks
+          ? `${baseText} Tareas asignadas: ${tasksSummary}.`
+          : baseText
+
         return publishEmailToQueue({
           to: staff.EMAIL,
           subject: `Nueva meta asignada: ${goal.DESCRIPTION}`,
           templateName: 'goal-assignment',
-          text: `Hola ${staffName}, se ha definido la meta "${goal.DESCRIPTION}" para el módulo ${module.DESCRIPTION} durante ${periodLabel}. Tu objetivo asignado es ${individualTargetFormatted}.`,
+          text: textBody,
           record: {
             staffName,
             staffEmail: staff.EMAIL,
@@ -461,10 +574,123 @@ export class GoalService extends BaseService {
             individualTargetFormatted,
             supervisorName,
             supervisorEmail,
+            taskAssignments: hasTasks ? tasksForTemplate : undefined,
           },
         })
       })
     )
+  }
+
+  private sanitizeTaskPayloads(
+    tasks: GoalTaskPayloadInput[] | undefined,
+    memberMap: Map<number, Staff>
+  ): SanitizedGoalTaskPayload[] {
+    if (!Array.isArray(tasks) || !tasks.length) {
+      throw new BadRequestError(
+        'Debe registrar al menos una tarea para la meta seleccionada.'
+      )
+    }
+
+    return tasks.map((task, index) => {
+      const description = String(task?.DESCRIPTION ?? '').trim()
+      if (!description) {
+        throw new BadRequestError(
+          `La descripción de la tarea #${index + 1} es obligatoria.`
+        )
+      }
+      if (description.length > 100) {
+        throw new BadRequestError(
+          `La descripción de la tarea "${description}" excede el límite permitido.`
+        )
+      }
+
+      const target = Number(task?.TARGET ?? 0)
+      if (!Number.isInteger(target) || target <= 0) {
+        throw new BadRequestError(
+          `El objetivo de la tarea "${description}" debe ser un número entero mayor a cero.`
+        )
+      }
+
+      const staffAssignments = Array.isArray(task?.STAFF) ? task.STAFF : []
+      if (!staffAssignments.length) {
+        throw new BadRequestError(
+          `La tarea "${description}" debe tener al menos un operador asignado.`
+        )
+      }
+
+      const seenStaff = new Set<number>()
+      const sanitizedStaff = staffAssignments.map((assignment, staffIndex) => {
+        const staffId = Number(assignment?.STAFF_ID)
+        if (!Number.isInteger(staffId)) {
+          throw new BadRequestError(
+            `El operador #${
+              staffIndex + 1
+            } en la tarea "${description}" no es válido.`
+          )
+        }
+        if (!memberMap.has(staffId)) {
+          throw new BadRequestError(
+            `El operador asignado en la tarea "${description}" no pertenece al módulo seleccionado.`
+          )
+        }
+        if (seenStaff.has(staffId)) {
+          throw new BadRequestError(
+            `No puede repetir al mismo operador en la tarea "${description}".`
+          )
+        }
+        seenStaff.add(staffId)
+
+        const staffTarget = Number(assignment?.TARGET ?? 0)
+        if (!Number.isInteger(staffTarget) || staffTarget <= 0) {
+          throw new BadRequestError(
+            `El objetivo del operador en la tarea "${description}" debe ser un número entero mayor a cero.`
+          )
+        }
+
+        return { STAFF_ID: staffId, TARGET: staffTarget }
+      })
+
+      const staffTotal = sanitizedStaff.reduce(
+        (acc, item) => acc + item.TARGET,
+        0
+      )
+
+      if (staffTotal !== target) {
+        throw new BadRequestError(
+          `La suma de objetivos por operador en la tarea "${description}" debe coincidir con su objetivo total.`
+        )
+      }
+
+      const comment =
+        typeof task?.COMMENT === 'string'
+          ? task.COMMENT.trim().slice(0, 500) || null
+          : null
+      const unitsPerItemRaw = Number((task as any)?.UNITS_PER_ITEM ?? 1)
+      const unitsPerItem =
+        Number.isFinite(unitsPerItemRaw) && unitsPerItemRaw > 0
+          ? Number(unitsPerItemRaw)
+          : 1
+
+      return {
+        DESCRIPTION: description,
+        COMMENT: comment,
+        TARGET: target,
+        UNITS_PER_ITEM: unitsPerItem,
+        STAFF: sanitizedStaff,
+      }
+    })
+  }
+
+  private aggregateTargetsByStaff(
+    tasks: SanitizedGoalTaskPayload[]
+  ): Map<number, number> {
+    return tasks.reduce((acc, task) => {
+      for (const assignment of task.STAFF) {
+        const current = acc.get(assignment.STAFF_ID) ?? 0
+        acc.set(assignment.STAFF_ID, current + assignment.TARGET)
+      }
+      return acc
+    }, new Map<number, number>())
   }
 
   @CatchServiceError()
@@ -1083,19 +1309,108 @@ export class GoalService extends BaseService {
       ),
       PROGRESS AS (
         SELECT
-          gp."GOAL_MODULE_ID",
-          gp."PERIOD",
-          DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "TARGET_DATE",
-          SUM(gp."ACTUAL_VALUE") AS "ACTUAL_VALUE",
-          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME",
-          MAX(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) AS "LAST_UPDATE"
-        FROM public."GOAL_PROGRESS" gp
-        WHERE gp."STATE" = 'A'
-          AND gp."SCOPE" = 'module'
-          AND gp."GOAL_MODULE_ID" IS NOT NULL
-        GROUP BY gp."GOAL_MODULE_ID",
-                 gp."PERIOD",
-                 DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT"))
+          gtc."GOAL_MODULE_ID",
+          gtc."PERIOD",
+          DATE(
+            COALESCE(gtc."RECORDED_AT", gtc."UPDATED_AT", gtc."CREATED_AT")
+          ) AS "TARGET_DATE",
+          SUM(
+            gtc."UNITS" /
+            NULLIF(
+              COALESCE(gt."UNITS_PER_ITEM", 1),
+              0
+            )
+          ) AS "ACTUAL_VALUE",
+          0::numeric AS "ACTUAL_TIME",
+          MAX(
+            COALESCE(gtc."RECORDED_AT", gtc."UPDATED_AT", gtc."CREATED_AT")
+          ) AS "LAST_UPDATE"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        LEFT JOIN public."GOAL_TASK" gt
+          ON gt."GOAL_TASK_ID" = gtc."GOAL_TASK_ID"
+        WHERE gtc."STATE" = 'A'
+        GROUP BY gtc."GOAL_MODULE_ID",
+                 gtc."PERIOD",
+                 DATE(
+                   COALESCE(gtc."RECORDED_AT", gtc."UPDATED_AT", gtc."CREATED_AT")
+                 )
+      ),
+      TASK_COMPLETION_TOTAL AS (
+        SELECT
+          gtc."GOAL_TASK_ID",
+          SUM(gtc."UNITS") AS "TOTAL_UNITS"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        WHERE gtc."STATE" = 'A'
+        GROUP BY gtc."GOAL_TASK_ID"
+      ),
+      TASK_COMPLETION_BY_STAFF AS (
+        SELECT
+          gtc."GOAL_TASK_ID",
+          gtc."STAFF_ID",
+          SUM(gtc."UNITS") AS "UNITS"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        WHERE gtc."STATE" = 'A'
+        GROUP BY gtc."GOAL_TASK_ID", gtc."STAFF_ID"
+      ),
+      TASKS_DETAIL AS (
+        SELECT
+          gt."GOAL_MODULE_ID",
+          gt."GOAL_TASK_ID",
+          gt."DESCRIPTION",
+          gt."COMMENT",
+          gt."TARGET",
+          COALESCE(gt."UNITS_PER_ITEM", 1) AS "UNITS_PER_ITEM",
+          COALESCE(tt."TOTAL_UNITS", 0) AS "COMPLETED_UNITS",
+          JSONB_AGG(
+            jsonb_build_object(
+              'staffId', s."STAFF_ID",
+              'staffName',
+                btrim(
+                  COALESCE(s."NAME", '') || ' ' || COALESCE(s."LAST_NAME", '')
+                ),
+              'target', gts."TARGET",
+              'completed', COALESCE(ts."UNITS", 0)
+            )
+            ORDER BY s."NAME", s."LAST_NAME"
+          ) FILTER (WHERE gts."STAFF_ID" IS NOT NULL) AS "ASSIGNEES"
+        FROM public."GOAL_TASK" gt
+        LEFT JOIN public."GOAL_TASK_X_STAFF" gts
+          ON gts."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+         AND gts."STATE" = 'A'
+        LEFT JOIN public."STAFF" s
+          ON s."STAFF_ID" = gts."STAFF_ID"
+        LEFT JOIN TASK_COMPLETION_TOTAL tt
+          ON tt."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+        LEFT JOIN TASK_COMPLETION_BY_STAFF ts
+          ON ts."GOAL_TASK_ID" = gts."GOAL_TASK_ID"
+         AND ts."STAFF_ID" = gts."STAFF_ID"
+        WHERE gt."STATE" = 'A'
+        GROUP BY
+          gt."GOAL_MODULE_ID",
+          gt."GOAL_TASK_ID",
+          gt."DESCRIPTION",
+          gt."COMMENT",
+          gt."TARGET",
+          gt."UNITS_PER_ITEM",
+          tt."TOTAL_UNITS"
+      ),
+      TASKS_AGG AS (
+        SELECT
+          td."GOAL_MODULE_ID",
+          jsonb_agg(
+            jsonb_build_object(
+              'goalTaskId', td."GOAL_TASK_ID",
+              'description', td."DESCRIPTION",
+              'comment', td."COMMENT",
+              'target', td."TARGET",
+              'completedUnits', td."COMPLETED_UNITS",
+              'unitsPerItem', td."UNITS_PER_ITEM",
+              'assignees', COALESCE(td."ASSIGNEES", '[]'::jsonb)
+            )
+            ORDER BY td."GOAL_TASK_ID"
+          ) AS "TASKS"
+        FROM TASKS_DETAIL td
+        GROUP BY td."GOAL_MODULE_ID"
       ),
       DATA AS (
         SELECT
@@ -1122,12 +1437,40 @@ export class GoalService extends BaseService {
          AND p."TARGET_DATE" = t."TARGET_DATE"
       )
       SELECT
-        sub.*,
+        sub."GOAL_MODULE_ID",
+        sub."GOAL_ID",
+        sub."DESCRIPTION",
+        sub."WEIGHT",
+        sub."STATE",
+        sub."MODULE_ID",
+        sub."PERIOD",
+        sub."TARGET_DATE",
+        sub."TARGET_VALUE",
+        sub."TARGET_TIME",
+        GREATEST(
+          COALESCE(
+            sub."EFFECTIVE_ACTUAL_ACC"
+              - LAG(sub."EFFECTIVE_ACTUAL_ACC") OVER (
+                  PARTITION BY sub."GOAL_MODULE_ID", sub."PERIOD"
+                  ORDER BY sub."TARGET_DATE"
+                ),
+            sub."EFFECTIVE_ACTUAL_ACC"
+          ),
+          0
+        ) AS "ACTUAL_VALUE",
+        sub."ACTUAL_TIME",
+        sub."TARGET_VALUE_ACC",
+        sub."TARGET_TIME_ACC",
+        sub."EFFECTIVE_ACTUAL_ACC" AS "ACTUAL_VALUE_ACC",
+        sub."ACTUAL_TIME_ACC",
+        sub."UPDATED_AT",
+        sub."TASKS",
+        sub."FILTER",
         CASE
           WHEN sub."TARGET_VALUE_ACC" = 0 THEN NULL
           ELSE ROUND(
             LEAST(
-              COALESCE(sub."ACTUAL_VALUE_ACC", 0)::decimal
+              COALESCE(sub."EFFECTIVE_ACTUAL_ACC", 0)::decimal
               / NULLIF(sub."TARGET_VALUE_ACC", 0)
               * 100,
               100
@@ -1165,9 +1508,43 @@ export class GoalService extends BaseService {
           SUM(d."ACTUAL_VALUE") OVER w AS "ACTUAL_VALUE_ACC",
           SUM(d."ACTUAL_TIME") OVER w AS "ACTUAL_TIME_ACC",
           d."LAST_UPDATE" AS "UPDATED_AT",
+          COALESCE(ta."TASKS", '[]'::jsonb) AS "TASKS",
+          COALESCE(ratio."MIN_RATIO", 0) AS "MIN_RATIO",
+          COALESCE(ratio."MIN_RATIO", 0) * SUM(d."TARGET_VALUE") OVER w AS "EFFECTIVE_ACTUAL_ACC",
           d."DESCRIPTION" || ' ' || d."GOAL_ID" || ' ' ||
             to_char(d."TARGET_DATE", 'YYYY-MM-DD') AS "FILTER"
         FROM DATA d
+        LEFT JOIN TASKS_AGG ta
+          ON ta."GOAL_MODULE_ID" = d."GOAL_MODULE_ID"
+        LEFT JOIN LATERAL (
+          SELECT
+            MIN(
+              CASE
+                WHEN gt."TARGET" > 0 THEN
+                  COALESCE((
+                    SELECT
+                      SUM(
+                        gtc."UNITS" /
+                        NULLIF(COALESCE(gt."UNITS_PER_ITEM", 1), 0)
+                      )
+                    FROM public."GOAL_TASK_COMPLETION" gtc
+                    WHERE gtc."STATE" = 'A'
+                      AND gtc."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+                      AND DATE(
+                        COALESCE(
+                          gtc."RECORDED_AT",
+                          gtc."UPDATED_AT",
+                          gtc."CREATED_AT"
+                        )
+                      ) <= d."TARGET_DATE"
+                  ) / gt."TARGET"::numeric, 0)
+                ELSE 0
+              END
+            ) AS "MIN_RATIO"
+          FROM public."GOAL_TASK" gt
+          WHERE gt."GOAL_MODULE_ID" = d."GOAL_MODULE_ID"
+            AND gt."STATE" = 'A'
+        ) AS ratio ON TRUE
         WINDOW w AS (
           PARTITION BY d."GOAL_MODULE_ID", d."PERIOD"
           ORDER BY d."TARGET_DATE"
@@ -1193,6 +1570,94 @@ export class GoalService extends BaseService {
     }
 
     return this.success({ data, metadata })
+  }
+
+  @CatchServiceError()
+  async getGoalTasksDetail(
+    moduleId: number,
+    period: number,
+    goalId: number
+  ): Promise<ApiResponse> {
+    if (!Number.isInteger(moduleId) || !Number.isInteger(period) || !Number.isInteger(goalId)) {
+      throw new BadRequestError('Parámetros inválidos.')
+    }
+
+    const statement = `
+      WITH TASK_COMPLETION_TOTAL AS (
+        SELECT
+          gtc."GOAL_TASK_ID",
+          SUM(gtc."UNITS") AS "TOTAL_UNITS"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        WHERE gtc."STATE" = 'A'
+        GROUP BY gtc."GOAL_TASK_ID"
+      ),
+      TASK_COMPLETION_BY_STAFF AS (
+        SELECT
+          gtc."GOAL_TASK_ID",
+          gtc."STAFF_ID",
+          SUM(gtc."UNITS") AS "UNITS"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        WHERE gtc."STATE" = 'A'
+        GROUP BY gtc."GOAL_TASK_ID", gtc."STAFF_ID"
+      )
+      SELECT
+        gt."GOAL_TASK_ID" AS "goalTaskId",
+        gt."DESCRIPTION" AS "description",
+        gt."COMMENT" AS "comment",
+        gt."TARGET" AS "target",
+        gt."UNITS_PER_ITEM" AS "unitsPerItem",
+        COALESCE(tct."TOTAL_UNITS", 0) AS "completedUnits",
+        jsonb_agg(
+          jsonb_build_object(
+            'staffId', gts."STAFF_ID",
+            'staffName',
+              btrim(
+                COALESCE(s."NAME", '') || ' ' || COALESCE(s."LAST_NAME", '')
+              ),
+            'target', gts."TARGET",
+            'completed', COALESCE(tcs."UNITS", 0)
+          )
+          ORDER BY s."NAME", s."LAST_NAME"
+        ) FILTER (WHERE gts."STAFF_ID" IS NOT NULL) AS "assignees"
+      FROM public."GOAL_TASK" gt
+      INNER JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gt."GOAL_MODULE_ID"
+      LEFT JOIN public."GOAL_TASK_X_STAFF" gts
+        ON gts."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+       AND gts."STATE" = 'A'
+      LEFT JOIN public."STAFF" s
+        ON s."STAFF_ID" = gts."STAFF_ID"
+      LEFT JOIN TASK_COMPLETION_TOTAL tct
+        ON tct."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+      LEFT JOIN TASK_COMPLETION_BY_STAFF tcs
+        ON tcs."GOAL_TASK_ID" = gts."GOAL_TASK_ID"
+          AND tcs."STAFF_ID" = gts."STAFF_ID"
+      WHERE gm."MODULE_ID" = $1
+        AND gm."PERIOD" = $2
+        AND gm."GOAL_ID" = $3
+        AND gm."STATE" = 'A'
+        AND gt."STATE" = 'A'
+      GROUP BY
+        gt."GOAL_TASK_ID",
+        gt."DESCRIPTION",
+        gt."COMMENT",
+        gt."TARGET",
+        gt."UNITS_PER_ITEM",
+        tct."TOTAL_UNITS"
+      ORDER BY gt."GOAL_TASK_ID"
+    `
+
+    const data = await this.dataSource.query(statement, [
+      moduleId,
+      period,
+      goalId,
+    ])
+
+    if (!data.length) {
+      return this.noContent()
+    }
+
+    return this.success({ data })
   }
 
   @CatchServiceError()

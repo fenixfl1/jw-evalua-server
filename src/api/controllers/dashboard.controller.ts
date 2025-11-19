@@ -78,3 +78,34 @@ export const getDashboardActivityController = async (
     next(error)
   }
 }
+
+export const getWorkedHoursByModuleController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const period = parseNumberParam(req.query.period as QueryValue)
+    const result = await dashboardService.getWorkedHoursByModule(period)
+
+    sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getWorkedHoursByStaffController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const period = parseNumberParam(req.query.period as QueryValue)
+    const moduleId = parseNumberParam(req.query.moduleId as QueryValue)
+    const result = await dashboardService.getWorkedHoursByStaff(period, moduleId)
+
+    sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}

@@ -1,0 +1,131 @@
+import { MigrationInterface, QueryRunner } from 'typeorm'
+
+export class CreateOperatorTaskCompletions1762305000000
+  implements MigrationInterface
+{
+  name = 'CreateOperatorTaskCompletions1762305000000'
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      CREATE TABLE IF NOT EXISTS "GOAL_TASK_COMPLETION" (
+        "GOAL_TASK_COMPLETION_ID" SERIAL PRIMARY KEY,
+        "GOAL_TASK_ID" integer NOT NULL,
+        "GOAL_TASK_STAFF_ID" integer,
+        "GOAL_PROGRESS_ID" integer NOT NULL,
+        "GOAL_ID" integer NOT NULL,
+        "GOAL_MODULE_ID" integer,
+        "MODULE_ID" integer,
+        "PERIOD" integer,
+        "STAFF_ID" integer NOT NULL,
+        "UNITS" integer NOT NULL DEFAULT 1,
+        "RECORDED_AT" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "METADATA" jsonb,
+        "CREATED_AT" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "CREATED_BY" integer,
+        "STATE" char(1) NOT NULL DEFAULT 'A',
+        "UPDATED_AT" TIMESTAMP,
+        "UPDATED_BY" integer
+      );
+    `)
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_GOAL_TASK_COMPLETION_STAFF_DATE"
+      ON "GOAL_TASK_COMPLETION" ("STAFF_ID", "RECORDED_AT");
+    `)
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_GOAL_TASK_COMPLETION_TASK_DATE"
+      ON "GOAL_TASK_COMPLETION" ("GOAL_TASK_ID", "RECORDED_AT");
+    `)
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_GOAL_TASK_COMPLETION_STAFF_TASK"
+      ON "GOAL_TASK_COMPLETION" ("STAFF_ID", "GOAL_TASK_ID");
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_TASK"
+      FOREIGN KEY ("GOAL_TASK_ID")
+      REFERENCES "GOAL_TASK"("GOAL_TASK_ID")
+      ON DELETE CASCADE ON UPDATE NO ACTION;
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_ASSIGNMENT"
+      FOREIGN KEY ("GOAL_TASK_STAFF_ID")
+      REFERENCES "GOAL_TASK_X_STAFF"("GOAL_TASK_STAFF_ID")
+      ON DELETE SET NULL ON UPDATE NO ACTION;
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_PROGRESS"
+      FOREIGN KEY ("GOAL_PROGRESS_ID")
+      REFERENCES "GOAL_PROGRESS"("GOAL_PROGRESS_ID")
+      ON DELETE CASCADE ON UPDATE NO ACTION;
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_STAFF"
+      FOREIGN KEY ("STAFF_ID")
+      REFERENCES "STAFF"("STAFF_ID")
+      ON DELETE CASCADE ON UPDATE NO ACTION;
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_GOAL"
+      FOREIGN KEY ("GOAL_ID")
+      REFERENCES "GOAL"("GOAL_ID")
+      ON DELETE CASCADE ON UPDATE NO ACTION;
+    `)
+
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      ADD CONSTRAINT "FK_GOAL_TASK_COMPLETION_GOAL_MODULE"
+      FOREIGN KEY ("GOAL_MODULE_ID")
+      REFERENCES "GOAL_X_MODULE"("GOAL_MODULE_ID")
+      ON DELETE SET NULL ON UPDATE NO ACTION;
+    `)
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_GOAL_MODULE";
+    `)
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_GOAL";
+    `)
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_STAFF";
+    `)
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_PROGRESS";
+    `)
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_ASSIGNMENT";
+    `)
+    await queryRunner.query(`
+      ALTER TABLE "GOAL_TASK_COMPLETION"
+      DROP CONSTRAINT IF EXISTS "FK_GOAL_TASK_COMPLETION_TASK";
+    `)
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_GOAL_TASK_COMPLETION_STAFF_TASK";`
+    )
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_GOAL_TASK_COMPLETION_TASK_DATE";`
+    )
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS "IDX_GOAL_TASK_COMPLETION_STAFF_DATE";`
+    )
+    await queryRunner.query(`DROP TABLE IF EXISTS "GOAL_TASK_COMPLETION";`)
+  }
+}

@@ -2,11 +2,13 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
+import http from 'http'
 import { AppDataSource } from './data-source'
 import { serverMessage } from '@helpers/server-message'
 import routes from './api/routes'
 import { errorHandler } from './api/middlewares/error.middleware'
 import { startConsumer } from './api/services/email/email-consumer.service'
+import { initSocket } from './realtime/socket'
 
 const start = performance.now()
 
@@ -29,7 +31,9 @@ async function init() {
 
     await AppDataSource.initialize()
 
-    app.listen(process.env.APP_PORT)
+    const server = http.createServer(app)
+    initSocket(server)
+    server.listen(process.env.APP_PORT)
 
     serverMessage(`${(performance.now() - start).toFixed(2)} ms`)
   } catch (error) {

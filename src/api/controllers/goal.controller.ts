@@ -129,6 +129,23 @@ export const getGoalSummaryModulePaginationController = async (
   }
 }
 
+export const getGoalModuleTasksController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const moduleId = Number(req.params.moduleId)
+    const period = Number(req.query.period)
+    const goalId = Number(req.query.goalId)
+
+    const result = await goalService.getGoalTasksDetail(moduleId, period, goalId)
+    return sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const getGoalsPaginationController = async (
   req: Request,
   res: Response,
