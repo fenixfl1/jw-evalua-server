@@ -3,7 +3,7 @@ import { ApiResponse, Metadata, Pagination } from '@src/types/api.types'
 import { preparePostgresQuery } from '@src/api/middlewares/prepare-postgres-query'
 import { getQueryMetadata, queryRunner } from '@src/helpers/query-utils'
 import { GoalTaskSession } from '@src/entity/GoalTaskSession'
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 import { Staff } from '@src/entity/Staff'
 import { Module } from '@src/entity/Module'
 
@@ -357,6 +357,8 @@ export class DashboardService extends BaseService {
     period?: number
   ): Promise<ApiResponse<WorkedHoursModule[]>> {
     const sessions = await this.loadSessions({ period })
+    const moduleProgressHours = await this.getModuleProgressHours({ period })
+    const staffManualSeconds = await this.getStaffManualSeconds({ period })
 
     const moduleMap = new Map<
       number | null,
@@ -378,11 +380,46 @@ export class DashboardService extends BaseService {
       if (session.STAFF_ID) existing.staff.add(session.STAFF_ID)
     })
 
+    moduleProgressHours.forEach((hours, moduleId) => {
+      if (!hours) return
+      const existing =
+        moduleMap.get(moduleId) ??
+        (() => {
+          const entry = {
+            seconds: 0,
+            activeSessions: 0,
+            staff: new Set<number>(),
+          }
+          moduleMap.set(moduleId, entry)
+          return entry
+        })()
+      existing.seconds += hours * 3600
+    })
+
+    staffManualSeconds.forEach((info, staffId) => {
+      if (info.moduleId === undefined) return
+      const existing =
+        moduleMap.get(info.moduleId) ??
+        (() => {
+          const entry = {
+            seconds: 0,
+            activeSessions: 0,
+            staff: new Set<number>(),
+          }
+          moduleMap.set(info.moduleId, entry)
+          return entry
+        })()
+      existing.seconds += info.seconds
+      existing.staff.add(staffId)
+    })
+
     const moduleIds = Array.from(moduleMap.keys()).filter(
       (id): id is number => id !== null && Number.isInteger(id)
     )
     const modules = moduleIds.length
-      ? await this.moduleRepository.findBy({ MODULE_ID: moduleIds as number[] } as never)
+      ? await this.moduleRepository.find({
+          where: { MODULE_ID: In(moduleIds) as never },
+        })
       : []
     const moduleNameMap = new Map<number, string>(
       modules.map((m) => [m.MODULE_ID, m.DESCRIPTION])
@@ -416,6 +453,10 @@ export class DashboardService extends BaseService {
     moduleId?: number
   ): Promise<ApiResponse<WorkedHoursStaff[]>> {
     const sessions = await this.loadSessions({ period, moduleId })
+    const staffManualSeconds = await this.getStaffManualSeconds({
+      period,
+      moduleId,
+    })
 
     const staffMap = new Map<
       number,
@@ -443,14 +484,34 @@ export class DashboardService extends BaseService {
       }
     })
 
+    staffManualSeconds.forEach((info, staffId) => {
+      const existing =
+        staffMap.get(staffId) ??
+        (() => {
+          const entry = {
+            seconds: 0,
+            activeSessions: 0,
+            moduleId: info.moduleId ?? null,
+          }
+          staffMap.set(staffId, entry)
+          return entry
+        })()
+      existing.seconds += info.seconds
+      if (!existing.moduleId && info.moduleId !== undefined) {
+        existing.moduleId = info.moduleId
+      }
+    })
+
     if (!staffMap.size) {
       return this.success({ data: [] })
     }
 
     const staffIds = Array.from(staffMap.keys())
-    const staffRecords = await this.staffRepository.findBy({
-      STAFF_ID: staffIds as number[],
-    } as never)
+    const staffRecords = staffIds.length
+      ? await this.staffRepository.find({
+          where: { STAFF_ID: In(staffIds) as never },
+        })
+      : []
 
     const moduleIds = Array.from(
       new Set(
@@ -460,7 +521,9 @@ export class DashboardService extends BaseService {
       )
     ) as number[]
     const modules = moduleIds.length
-      ? await this.moduleRepository.findBy({ MODULE_ID: moduleIds } as never)
+      ? await this.moduleRepository.find({
+          where: { MODULE_ID: In(moduleIds) as never },
+        })
       : []
     const moduleNameMap = new Map<number, string>(
       modules.map((m) => [m.MODULE_ID, m.DESCRIPTION])
@@ -595,7 +658,7 @@ export class DashboardService extends BaseService {
     clause: string
     params: Record<string, unknown>
   } {
-    const conditions: string[] = [`gp."STATE" = 'A'`, 'gp."SCOPE" = \'module\'']
+    const conditions: string[] = [`gp."STATE" = 'A'`]
     const params: Record<string, unknown> = {}
 
     if (filters.moduleId) {
@@ -817,8 +880,34 @@ export class DashboardService extends BaseService {
           gp."GOAL_ID",
           gp."MODULE_ID",
           gp."PERIOD",
-          SUM(COALESCE(gp."ACTUAL_VALUE", 0)) AS "ACTUAL_VALUE",
-          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME"
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'module'
+              THEN COALESCE(gp."ACTUAL_VALUE", 0)
+              ELSE 0
+            END
+          ) AS "MODULE_VALUE",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'module'
+              THEN COALESCE(gp."ACTUAL_TIME", 0)
+              ELSE 0
+            END
+          ) AS "MODULE_TIME",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'individual'
+              THEN COALESCE(gp."ACTUAL_VALUE", 0)
+              ELSE 0
+            END
+          ) AS "INDIVIDUAL_VALUE",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'individual'
+              THEN COALESCE(gp."ACTUAL_TIME", 0)
+              ELSE 0
+            END
+          ) AS "INDIVIDUAL_TIME"
         FROM public."GOAL_PROGRESS" gp
         ${progressWhere.clause}
         GROUP BY gp."GOAL_MODULE_ID", gp."GOAL_ID", gp."MODULE_ID", gp."PERIOD"
@@ -831,8 +920,16 @@ export class DashboardService extends BaseService {
         COALESCE(a."PERIOD", p."PERIOD") AS "PERIOD",
         COALESCE(a."TARGET_VALUE", 0) AS "TARGET_VALUE",
         COALESCE(a."TARGET_TIME", 0) AS "TARGET_TIME",
-        COALESCE(p."ACTUAL_VALUE", 0) AS "ACTUAL_VALUE",
-        COALESCE(p."ACTUAL_TIME", 0) AS "ACTUAL_TIME"
+        COALESCE(
+          NULLIF(p."MODULE_VALUE", 0),
+          p."INDIVIDUAL_VALUE",
+          0
+        ) AS "ACTUAL_VALUE",
+        COALESCE(
+          NULLIF(p."MODULE_TIME", 0),
+          p."INDIVIDUAL_TIME",
+          0
+        ) AS "ACTUAL_TIME"
       FROM ASSIGNED a
       FULL OUTER JOIN PROGRESS p
         ON p."GOAL_MODULE_ID" = a."GOAL_MODULE_ID"
@@ -854,18 +951,30 @@ export class DashboardService extends BaseService {
       ACTUAL_TIME: string | number | null
     }>(query.query, query.values)
 
-    return rows.map((row) => ({
-      goalModuleId:
-        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null,
-      goalId: row.GOAL_ID !== null ? Number(row.GOAL_ID) : null,
-      moduleId: row.MODULE_ID !== null ? Number(row.MODULE_ID) : null,
-      moduleName: this.normalizeModuleName(row.MODULE_NAME),
-      period: row.PERIOD !== null ? Number(row.PERIOD) : null,
-      targetValue: Number(row.TARGET_VALUE ?? 0),
-      targetTime: Number(row.TARGET_TIME ?? 0),
-      actualValue: Number(row.ACTUAL_VALUE ?? 0),
-      actualTime: Number(row.ACTUAL_TIME ?? 0),
-    }))
+    const sessionHours = await this.getSessionHoursByGoal(filters)
+    const supervisorHours = await this.getSupervisorHoursByGoal(filters)
+
+    return rows.map((row) => {
+      const goalModuleId =
+        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null
+      const period = row.PERIOD !== null ? Number(row.PERIOD) : null
+      const key = this.buildGoalModuleKey(goalModuleId, period)
+      const additionalTime =
+        (goalModuleId !== null ? sessionHours.get(key) ?? 0 : 0) +
+        (goalModuleId !== null ? supervisorHours.get(key) ?? 0 : 0)
+
+      return {
+        goalModuleId,
+        goalId: row.GOAL_ID !== null ? Number(row.GOAL_ID) : null,
+        moduleId: row.MODULE_ID !== null ? Number(row.MODULE_ID) : null,
+        moduleName: this.normalizeModuleName(row.MODULE_NAME),
+        period,
+        targetValue: Number(row.TARGET_VALUE ?? 0),
+        targetTime: Number(row.TARGET_TIME ?? 0),
+        actualValue: Number(row.ACTUAL_VALUE ?? 0),
+        actualTime: Number(row.ACTUAL_TIME ?? 0) + additionalTime,
+      }
+    })
   }
 
   private async getGoalComplianceSummary(
@@ -1000,9 +1109,9 @@ export class DashboardService extends BaseService {
     let inProgressCount = 0
     let notStartedCount = 0
 
-    const varianceSamples: number[] = []
-    const targetTimeSamples: number[] = []
-    const actualTimeSamples: number[] = []
+    let completedTargetTimeSum = 0
+    let completedActualTimeSum = 0
+    let completedVarianceSum = 0
 
     assignedDetails.forEach((detail) => {
       const isCompleted = detail.actualValue >= detail.targetValue
@@ -1020,13 +1129,9 @@ export class DashboardService extends BaseService {
           }
         }
 
-        varianceSamples.push(detail.actualTime - detail.targetTime)
-        if (detail.targetTime > 0) {
-          targetTimeSamples.push(detail.targetTime)
-        }
-        if (detail.actualTime > 0) {
-          actualTimeSamples.push(detail.actualTime)
-        }
+        completedTargetTimeSum += detail.targetTime
+        completedActualTimeSum += detail.actualTime
+        completedVarianceSum += detail.actualTime - detail.targetTime
       } else if (hasProgress) {
         inProgressCount += 1
       } else {
@@ -1054,18 +1159,22 @@ export class DashboardService extends BaseService {
       0
     )
 
-    const averageTargetTime = this.average(
-      completedDetails.map((detail) => detail.targetTime),
-      { allowZero: false }
-    )
-    const averageActualTime = this.average(
-      completedDetails.map((detail) => detail.actualTime),
-      { allowZero: false }
-    )
-    const averageTimeVariance = this.average(
-      completedDetails.map((detail) => detail.actualTime - detail.targetTime),
-      { allowNegative: true }
-    )
+    const averageTargetTime =
+      completedGoals > 0
+        ? this.roundNumber(completedTargetTimeSum / completedGoals)
+        : totalGoals > 0
+        ? this.roundNumber(totalTargetTime / totalGoals)
+        : null
+    const averageActualTime =
+      completedGoals > 0
+        ? this.roundNumber(completedActualTimeSum / completedGoals)
+        : totalGoals > 0
+        ? this.roundNumber(totalActualTime / totalGoals)
+        : null
+    const averageTimeVariance =
+      completedGoals > 0
+        ? this.roundNumber(completedVarianceSum / completedGoals)
+        : null
 
     const byModule = Array.from(moduleAccumulators.values())
       .map((entry) => {
@@ -1193,16 +1302,19 @@ export class DashboardService extends BaseService {
                 entry.completedActualTime / entry.completedCount
               )
             : null
+        const complianceRate =
+          entry.targetValue > 0
+            ? this.roundNumber(
+                Math.min((entry.actualValue / entry.targetValue) * 100, 150)
+              )
+            : null
 
         return {
           period: entry.period,
           periodLabel: entry.periodLabel,
           totalGoals: entry.totalGoals,
           completedGoals: entry.completedGoals,
-          completionRate: this.calculateCompletionRate(
-            entry.completedGoals,
-            entry.totalGoals
-          ),
+          completionRate: complianceRate,
           targetValue: entry.targetValue,
           actualValue: entry.actualValue,
           targetTime: this.roundNumber(entry.targetTime),
@@ -1267,6 +1379,172 @@ export class DashboardService extends BaseService {
     return `${moduleKey}-${periodKey}`
   }
 
+  private async getSessionHoursByGoal(
+    filters: DashboardSummaryFilters
+  ): Promise<Map<string, number>> {
+    const conditions: string[] = [`sess."STATE" = 'A'`, `sess."GOAL_MODULE_ID" IS NOT NULL`]
+    const params: Record<string, unknown> = {}
+
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      conditions.push('sess."MODULE_ID" = :sessionModuleId')
+      params.sessionModuleId = filters.moduleId
+    }
+
+    if (filters.periodStart !== undefined && filters.periodStart !== null) {
+      conditions.push('sess."PERIOD" >= :sessionPeriodStart')
+      params.sessionPeriodStart = filters.periodStart
+    }
+
+    if (filters.periodEnd !== undefined && filters.periodEnd !== null) {
+      conditions.push('sess."PERIOD" <= :sessionPeriodEnd')
+      params.sessionPeriodEnd = filters.periodEnd
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`
+    const sql = `
+      SELECT
+        sess."GOAL_MODULE_ID",
+        sess."PERIOD",
+        SUM(
+          COALESCE(sess."ACCUMULATED_SECONDS", 0)
+          +
+          CASE
+            WHEN sess."IS_ACTIVE" = TRUE THEN GREATEST(
+              EXTRACT(
+                EPOCH FROM (
+                  CURRENT_TIMESTAMP
+                  - COALESCE(sess."LAST_RESUMED_AT", sess."STARTED_AT")
+                )
+              ),
+              0
+            )
+            ELSE 0
+          END
+        ) AS "SECONDS"
+      FROM public."GOAL_TASK_SESSION" sess
+      ${whereClause}
+      GROUP BY sess."GOAL_MODULE_ID", sess."PERIOD"
+    `
+    const query = preparePostgresQuery(sql, params)
+    const rows = await queryRunner<{
+      GOAL_MODULE_ID: number | null
+      PERIOD: number | null
+      SECONDS: string | number | null
+    }>(query.query, query.values)
+
+    const map = new Map<string, number>()
+    rows.forEach((row) => {
+      const key = this.buildGoalModuleKey(
+        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null,
+        row.PERIOD !== null ? Number(row.PERIOD) : null
+      )
+      const hours = Number(row.SECONDS ?? 0) / 3600
+      map.set(key, hours)
+    })
+    return map
+  }
+
+  private async getSupervisorHoursByGoal(
+    filters: DashboardSummaryFilters
+  ): Promise<Map<string, number>> {
+    const conditions: string[] = [
+      `gtc."STATE" = 'A'`,
+      `gtc."GOAL_MODULE_ID" IS NOT NULL`,
+      `gtc."METADATA" IS NOT NULL`,
+      `gtc."METADATA" ? 'timeMinutes'`,
+    ]
+    const params: Record<string, unknown> = {}
+
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      conditions.push('gtc."MODULE_ID" = :supervisorModuleId')
+      params.supervisorModuleId = filters.moduleId
+    }
+
+    if (filters.periodStart !== undefined && filters.periodStart !== null) {
+      conditions.push('gtc."PERIOD" >= :supervisorPeriodStart')
+      params.supervisorPeriodStart = filters.periodStart
+    }
+
+    if (filters.periodEnd !== undefined && filters.periodEnd !== null) {
+      conditions.push('gtc."PERIOD" <= :supervisorPeriodEnd')
+      params.supervisorPeriodEnd = filters.periodEnd
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`
+    const sql = `
+      SELECT
+        gtc."GOAL_MODULE_ID",
+        gtc."PERIOD",
+        SUM(
+          CASE
+            WHEN (gtc."METADATA"->>'timeMinutes') ~ '^[-+]?[0-9]+(\\.[0-9]+)?$'
+            THEN (gtc."METADATA"->>'timeMinutes')::numeric
+            ELSE 0
+          END
+        ) AS "MINUTES"
+      FROM public."GOAL_TASK_COMPLETION" gtc
+      ${whereClause}
+      GROUP BY gtc."GOAL_MODULE_ID", gtc."PERIOD"
+    `
+    const query = preparePostgresQuery(sql, params)
+    const rows = await queryRunner<{
+      GOAL_MODULE_ID: number | null
+      PERIOD: number | null
+      MINUTES: string | number | null
+    }>(query.query, query.values)
+
+    const map = new Map<string, number>()
+    rows.forEach((row) => {
+      const key = this.buildGoalModuleKey(
+        row.GOAL_MODULE_ID !== null ? Number(row.GOAL_MODULE_ID) : null,
+        row.PERIOD !== null ? Number(row.PERIOD) : null
+      )
+      const hours = Number(row.MINUTES ?? 0) / 60
+      map.set(key, hours)
+    })
+    return map
+  }
+
+  private async getSessionSecondsByStaff(
+    filters: DashboardSummaryFilters
+  ): Promise<Map<number, number>> {
+    const sessionFilters: {
+      period?: number
+      periodStart?: number
+      periodEnd?: number
+      moduleId?: number
+    } = {}
+
+    if (
+      filters.periodStart !== undefined &&
+      filters.periodEnd !== undefined &&
+      filters.periodStart === filters.periodEnd
+    ) {
+      sessionFilters.period = filters.periodStart
+    } else {
+      if (filters.periodStart !== undefined) {
+        sessionFilters.periodStart = filters.periodStart
+      }
+      if (filters.periodEnd !== undefined) {
+        sessionFilters.periodEnd = filters.periodEnd
+      }
+    }
+    if (filters.moduleId !== undefined) {
+      sessionFilters.moduleId = filters.moduleId
+    }
+
+    const sessions = await this.loadSessions(sessionFilters)
+    const map = new Map<number, number>()
+
+    sessions.forEach(({ session, seconds }) => {
+      if (!session.STAFF_ID) return
+      const current = map.get(session.STAFF_ID) ?? 0
+      map.set(session.STAFF_ID, current + seconds)
+    })
+
+    return map
+  }
+
   private async getEmployeeProductivitySummary(
     filters: DashboardSummaryFilters,
     details: GoalProductivityDetail[]
@@ -1286,6 +1564,29 @@ export class DashboardService extends BaseService {
         targetTime: detail.targetTime,
         targetValue: detail.targetValue,
       })
+    })
+
+    const sessionSecondsByStaff = await this.getSessionSecondsByStaff(filters)
+    const manualSecondsByStaff = await this.getStaffManualSeconds({
+      moduleId: filters.moduleId,
+      period:
+        filters.periodStart !== undefined &&
+        filters.periodEnd !== undefined &&
+        filters.periodStart === filters.periodEnd
+          ? filters.periodStart
+          : undefined,
+      periodStart:
+        filters.periodStart !== undefined &&
+        filters.periodEnd !== undefined &&
+        filters.periodStart === filters.periodEnd
+          ? undefined
+          : filters.periodStart,
+      periodEnd:
+        filters.periodStart !== undefined &&
+        filters.periodEnd !== undefined &&
+        filters.periodStart === filters.periodEnd
+          ? undefined
+          : filters.periodEnd,
     })
 
     const conditions: string[] = [
@@ -1470,6 +1771,59 @@ export class DashboardService extends BaseService {
       } else {
         entry.pendingGoals += 1
       }
+    })
+
+    sessionSecondsByStaff.forEach((seconds, staffId) => {
+      if (!seconds) return
+      const entry = staffMap.get(staffId)
+      if (!entry) return
+      const hours = seconds / 3600
+      entry.totalActualTime += hours
+      entry.timeVarianceSum += hours
+    })
+
+    manualSecondsByStaff.forEach(({ seconds }, staffId) => {
+      if (!seconds) return
+      const entry = staffMap.get(staffId)
+      if (!entry) return
+      const hours = seconds / 3600
+      entry.totalActualTime += hours
+      entry.timeVarianceSum += hours
+    })
+
+    const staffIds = Array.from(staffMap.keys())
+    const staffRecords = staffIds.length
+      ? await this.staffRepository.find({
+          where: { STAFF_ID: In(staffIds) as never },
+        })
+      : []
+    const staffModuleIds = Array.from(
+      new Set(
+        staffRecords
+          .map((record) => record.MODULE_ID)
+          .filter(
+            (moduleId): moduleId is number =>
+              moduleId !== null && moduleId !== undefined
+          )
+      )
+    )
+    const explicitModules = staffModuleIds.length
+      ? await this.moduleRepository.find({
+          where: { MODULE_ID: In(staffModuleIds) as never },
+        })
+      : []
+    const explicitModuleNameMap = new Map<number, string>(
+      explicitModules.map((module) => [module.MODULE_ID, module.DESCRIPTION])
+    )
+    staffRecords.forEach((record) => {
+      const entry = staffMap.get(record.STAFF_ID)
+      if (!entry) return
+      const moduleId = record.MODULE_ID
+      const moduleName =
+        moduleId !== null && moduleId !== undefined
+          ? explicitModuleNameMap.get(moduleId) ?? 'Sin modulo'
+          : 'Sin modulo'
+      entry.modules.add(moduleName)
     })
 
     const employees = Array.from(staffMap.values())
@@ -1863,7 +2217,6 @@ export class DashboardService extends BaseService {
 
     const progressConditions: string[] = [
       `gp."STATE" = 'A'`,
-      `gp."SCOPE" = 'module'`,
       `gp."GOAL_MODULE_ID" IS NOT NULL`,
       `DATE(COALESCE(gp."UPDATED_AT", gp."CREATED_AT")) = CURRENT_DATE`,
     ]
@@ -1901,8 +2254,34 @@ export class DashboardService extends BaseService {
           gp."GOAL_MODULE_ID",
           gp."MODULE_ID",
           gp."PERIOD",
-          SUM(COALESCE(gp."ACTUAL_VALUE", 0)) AS "ACTUAL_VALUE",
-          SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "ACTUAL_TIME"
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'module'
+              THEN COALESCE(gp."ACTUAL_VALUE", 0)
+              ELSE 0
+            END
+          ) AS "MODULE_VALUE",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'module'
+              THEN COALESCE(gp."ACTUAL_TIME", 0)
+              ELSE 0
+            END
+          ) AS "MODULE_TIME",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'individual'
+              THEN COALESCE(gp."ACTUAL_VALUE", 0)
+              ELSE 0
+            END
+          ) AS "INDIVIDUAL_VALUE",
+          SUM(
+            CASE
+              WHEN gp."SCOPE" = 'individual'
+              THEN COALESCE(gp."ACTUAL_TIME", 0)
+              ELSE 0
+            END
+          ) AS "INDIVIDUAL_TIME"
         FROM public."GOAL_PROGRESS" gp
         ${progressWhere}
         GROUP BY gp."GOAL_MODULE_ID", gp."MODULE_ID", gp."PERIOD"
@@ -1910,13 +2289,35 @@ export class DashboardService extends BaseService {
       SELECT
         COALESCE(SUM(dt."TARGET_VALUE"), 0) AS "TARGET_VALUE",
         COALESCE(SUM(dt."TARGET_TIME"), 0) AS "TARGET_TIME",
-        COALESCE(SUM(COALESCE(pr."ACTUAL_VALUE", 0)), 0) AS "ACTUAL_VALUE",
-        COALESCE(SUM(COALESCE(pr."ACTUAL_TIME", 0)), 0) AS "ACTUAL_TIME",
+        COALESCE(
+          SUM(
+            COALESCE(
+              NULLIF(pr."MODULE_VALUE", 0),
+              pr."INDIVIDUAL_VALUE",
+              0
+            )
+          ),
+          0
+        ) AS "ACTUAL_VALUE",
+        COALESCE(
+          SUM(
+            COALESCE(
+              NULLIF(pr."MODULE_TIME", 0),
+              pr."INDIVIDUAL_TIME",
+              0
+            )
+          ),
+          0
+        ) AS "ACTUAL_TIME",
         COUNT(DISTINCT dt."GOAL_MODULE_ID") AS "ACTIVE_GOALS",
         COUNT(
           DISTINCT CASE
             WHEN dt."TARGET_VALUE" > 0
-             AND COALESCE(pr."ACTUAL_VALUE", 0) >= dt."TARGET_VALUE"
+             AND COALESCE(
+                   NULLIF(pr."MODULE_VALUE", 0),
+                   pr."INDIVIDUAL_VALUE",
+                   0
+                 ) >= dt."TARGET_VALUE"
             THEN dt."GOAL_MODULE_ID"
             ELSE NULL
           END
@@ -1940,9 +2341,87 @@ export class DashboardService extends BaseService {
     const targetValue = Number(summaryRow?.TARGET_VALUE ?? 0)
     const actualValue = Number(summaryRow?.ACTUAL_VALUE ?? 0)
     const targetTime = Number(summaryRow?.TARGET_TIME ?? 0)
-    const actualTime = Number(summaryRow?.ACTUAL_TIME ?? 0)
+    const baseActualTime = Number(summaryRow?.ACTUAL_TIME ?? 0)
     const activeGoals = Number(summaryRow?.ACTIVE_GOALS ?? 0)
     const completedGoals = Number(summaryRow?.COMPLETED_GOALS ?? 0)
+
+    const sessionConditions: string[] = [
+      `sess."STATE" = 'A'`,
+      `DATE(sess."STARTED_AT") = CURRENT_DATE`,
+    ]
+    const sessionParams: Record<string, unknown> = {}
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      sessionConditions.push('sess."MODULE_ID" = :sessionModuleId')
+      sessionParams.sessionModuleId = filters.moduleId
+    }
+    const sessionWhere = `WHERE ${sessionConditions.join(' AND ')}`
+    const sessionSql = `
+      SELECT
+        COALESCE(
+          SUM(
+            COALESCE(sess."ACCUMULATED_SECONDS", 0)
+            +
+            CASE
+              WHEN sess."IS_ACTIVE" = TRUE THEN GREATEST(
+                EXTRACT(
+                  EPOCH FROM (
+                    CURRENT_TIMESTAMP
+                    - COALESCE(sess."LAST_RESUMED_AT", sess."STARTED_AT")
+                  )
+                ),
+                0
+              )
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "SECONDS"
+      FROM public."GOAL_TASK_SESSION" sess
+      ${sessionWhere}
+    `
+    const sessionQuery = preparePostgresQuery(sessionSql, sessionParams)
+    const [sessionRow] = await queryRunner<{ SECONDS: string | number | null }>(
+      sessionQuery.query,
+      sessionQuery.values
+    )
+    const sessionHours = Number(sessionRow?.SECONDS ?? 0) / 3600
+
+    const supervisorConditions: string[] = [
+      `gtc."STATE" = 'A'`,
+      `DATE(gtc."RECORDED_AT") = CURRENT_DATE`,
+      `gtc."METADATA" IS NOT NULL`,
+      `gtc."METADATA" ? 'timeMinutes'`,
+    ]
+    const supervisorParams: Record<string, unknown> = {}
+    if (filters.moduleId !== undefined && filters.moduleId !== null) {
+      supervisorConditions.push('gtc."MODULE_ID" = :supervisorModuleId')
+      supervisorParams.supervisorModuleId = filters.moduleId
+    }
+    const supervisorSql = `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN (gtc."METADATA"->>'timeMinutes') ~ '^[-+]?[0-9]+(\\.[0-9]+)?$'
+              THEN (gtc."METADATA"->>'timeMinutes')::numeric
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "MINUTES"
+      FROM public."GOAL_TASK_COMPLETION" gtc
+      WHERE ${supervisorConditions.join(' AND ')}
+    `
+    const supervisorQuery = preparePostgresQuery(
+      supervisorSql,
+      supervisorParams
+    )
+    const [supervisorRow] = await queryRunner<{
+      MINUTES: string | number | null
+    }>(supervisorQuery.query, supervisorQuery.values)
+    const supervisorHours = Number(supervisorRow?.MINUTES ?? 0) / 60
+
+    const actualTime = baseActualTime + sessionHours + supervisorHours
 
     const completionRate =
       targetValue > 0
@@ -2148,6 +2627,8 @@ export class DashboardService extends BaseService {
 
   private async loadSessions(filters: {
     period?: number
+    periodStart?: number
+    periodEnd?: number
     moduleId?: number
   }): Promise<{ session: GoalTaskSession; seconds: number }[]> {
     const qb = this.goalTaskSessionRepository
@@ -2156,6 +2637,17 @@ export class DashboardService extends BaseService {
 
     if (Number.isInteger(filters.period)) {
       qb.andWhere('session."PERIOD" = :period', { period: filters.period })
+    } else {
+      if (Number.isInteger(filters.periodStart)) {
+        qb.andWhere('session."PERIOD" >= :periodStart', {
+          periodStart: filters.periodStart,
+        })
+      }
+      if (Number.isInteger(filters.periodEnd)) {
+        qb.andWhere('session."PERIOD" <= :periodEnd', {
+          periodEnd: filters.periodEnd,
+        })
+      }
     }
     if (Number.isInteger(filters.moduleId)) {
       qb.andWhere('session."MODULE_ID" = :moduleId', {
@@ -2177,6 +2669,206 @@ export class DashboardService extends BaseService {
 
       return { session, seconds }
     })
+  }
+
+  private async getModuleProgressHours(filters: {
+    period?: number
+    moduleId?: number
+  }): Promise<Map<number | null, number>> {
+    const conditions = [
+      `gp."STATE" = 'A'`,
+      `gp."SCOPE" = 'module'`,
+      `gp."ACTUAL_TIME" IS NOT NULL`,
+      `gp."ACTUAL_TIME" <> 0`,
+    ]
+    const params: Record<string, unknown> = {}
+
+    if (Number.isInteger(filters.period)) {
+      conditions.push('gp."PERIOD" = :progressPeriod')
+      params.progressPeriod = filters.period
+    }
+    if (Number.isInteger(filters.moduleId)) {
+      conditions.push(
+        'COALESCE(gp."MODULE_ID", gm."MODULE_ID") = :progressModuleId'
+      )
+      params.progressModuleId = filters.moduleId
+    }
+
+    const sql = `
+      SELECT
+        COALESCE(gp."MODULE_ID", gm."MODULE_ID") AS "MODULE_ID",
+        SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "HOURS"
+      FROM public."GOAL_PROGRESS" gp
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gp."GOAL_MODULE_ID"
+      WHERE ${conditions.join(' AND ')}
+        AND (gp."MODULE_ID" IS NOT NULL OR gm."MODULE_ID" IS NOT NULL)
+      GROUP BY COALESCE(gp."MODULE_ID", gm."MODULE_ID")
+    `
+
+    const query = preparePostgresQuery(sql, params)
+    const rows = await queryRunner<{
+      MODULE_ID: number | null
+      HOURS: string | number | null
+    }>(query.query, query.values)
+
+    const map = new Map<number | null, number>()
+    rows.forEach((row) => {
+      const moduleId =
+        row.MODULE_ID !== null && row.MODULE_ID !== undefined
+          ? Number(row.MODULE_ID)
+          : null
+      const hours = Number(row.HOURS ?? 0)
+      if (!hours) return
+      map.set(moduleId, hours)
+    })
+
+    return map
+  }
+
+  private async getStaffManualSeconds(filters: {
+    period?: number
+    moduleId?: number
+    periodStart?: number
+    periodEnd?: number
+  }): Promise<Map<number, { seconds: number; moduleId: number | null }>> {
+    const map = new Map<number, { seconds: number; moduleId: number | null }>()
+
+    const addPeriodFilter = (
+      column: string,
+      prefix: string,
+      conditions: string[],
+      params: Record<string, unknown>
+    ) => {
+      if (Number.isInteger(filters.period)) {
+        conditions.push(`${column} = :${prefix}`)
+        params[prefix] = filters.period
+      } else {
+        if (Number.isInteger(filters.periodStart)) {
+          conditions.push(`${column} >= :${prefix}Start`)
+          params[`${prefix}Start`] = filters.periodStart
+        }
+        if (Number.isInteger(filters.periodEnd)) {
+          conditions.push(`${column} <= :${prefix}End`)
+          params[`${prefix}End`] = filters.periodEnd
+        }
+      }
+    }
+
+    const addEntry = (staffId: number, moduleId: number | null, seconds: number) => {
+      if (!seconds || !Number.isFinite(seconds)) return
+      const existing =
+        map.get(staffId) ??
+        (() => {
+          const entry = { seconds: 0, moduleId }
+          map.set(staffId, entry)
+          return entry
+        })()
+      existing.seconds += seconds
+      if (moduleId !== null && existing.moduleId === null) {
+        existing.moduleId = moduleId
+      }
+    }
+
+    const progressConditions = [
+      `gp."STATE" = 'A'`,
+      `gp."SCOPE" = 'individual'`,
+      `gp."STAFF_ID" IS NOT NULL`,
+      `gp."ACTUAL_TIME" IS NOT NULL`,
+      `gp."ACTUAL_TIME" <> 0`,
+    ]
+    const progressParams: Record<string, unknown> = {}
+    addPeriodFilter('gp."PERIOD"', 'staffProgressPeriod', progressConditions, progressParams)
+    if (Number.isInteger(filters.moduleId)) {
+      progressConditions.push(
+        'COALESCE(gp."MODULE_ID", gm."MODULE_ID") = :staffProgressModuleId'
+      )
+      progressParams.staffProgressModuleId = filters.moduleId
+    }
+
+    const progressSql = `
+      SELECT
+        gp."STAFF_ID",
+        COALESCE(gp."MODULE_ID", gm."MODULE_ID") AS "MODULE_ID",
+        SUM(COALESCE(gp."ACTUAL_TIME", 0)) AS "HOURS"
+      FROM public."GOAL_PROGRESS" gp
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gp."GOAL_MODULE_ID"
+      WHERE ${progressConditions.join(' AND ')}
+        AND (gp."MODULE_ID" IS NOT NULL OR gm."MODULE_ID" IS NOT NULL)
+      GROUP BY gp."STAFF_ID", COALESCE(gp."MODULE_ID", gm."MODULE_ID")
+    `
+    const progressQuery = preparePostgresQuery(progressSql, progressParams)
+    const progressRows = await queryRunner<{
+      STAFF_ID: number
+      MODULE_ID: number | null
+      HOURS: string | number | null
+    }>(progressQuery.query, progressQuery.values)
+
+    progressRows.forEach((row) => {
+      const staffId = Number(row.STAFF_ID)
+      const moduleId =
+        row.MODULE_ID !== null && row.MODULE_ID !== undefined
+          ? Number(row.MODULE_ID)
+          : null
+      const hours = Number(row.HOURS ?? 0)
+      addEntry(staffId, moduleId, hours * 3600)
+    })
+
+    const metadataConditions = [
+      `gtc."STATE" = 'A'`,
+      `gtc."STAFF_ID" IS NOT NULL`,
+      `gtc."METADATA" IS NOT NULL`,
+      `gtc."METADATA" ? 'timeMinutes'`,
+    ]
+    const metadataParams: Record<string, unknown> = {}
+    addPeriodFilter('gtc."PERIOD"', 'staffMetaPeriod', metadataConditions, metadataParams)
+    if (Number.isInteger(filters.moduleId)) {
+      metadataConditions.push(
+        'COALESCE(gtc."MODULE_ID", gm."MODULE_ID") = :staffMetaModuleId'
+      )
+      metadataParams.staffMetaModuleId = filters.moduleId
+    }
+
+    const metadataSql = `
+      SELECT
+        gtc."STAFF_ID",
+        COALESCE(gtc."MODULE_ID", gm."MODULE_ID") AS "MODULE_ID",
+        SUM(
+          CASE
+            WHEN (gtc."METADATA"->>'timeMinutes') ~ '^[-+]?[0-9]+(\\.[0-9]+)?$'
+            THEN (gtc."METADATA"->>'timeMinutes')::numeric
+            ELSE 0
+          END
+        ) AS "MINUTES"
+      FROM public."GOAL_TASK_COMPLETION" gtc
+      LEFT JOIN public."GOAL_TASK" gt
+        ON gt."GOAL_TASK_ID" = gtc."GOAL_TASK_ID"
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gt."GOAL_MODULE_ID"
+      WHERE ${metadataConditions.join(' AND ')}
+        AND (gtc."MODULE_ID" IS NOT NULL OR gm."MODULE_ID" IS NOT NULL)
+      GROUP BY gtc."STAFF_ID", COALESCE(gtc."MODULE_ID", gm."MODULE_ID")
+    `
+
+    const metadataQuery = preparePostgresQuery(metadataSql, metadataParams)
+    const metadataRows = await queryRunner<{
+      STAFF_ID: number
+      MODULE_ID: number | null
+      MINUTES: string | number | null
+    }>(metadataQuery.query, metadataQuery.values)
+
+    metadataRows.forEach((row) => {
+      const staffId = Number(row.STAFF_ID)
+      const moduleId =
+        row.MODULE_ID !== null && row.MODULE_ID !== undefined
+          ? Number(row.MODULE_ID)
+          : null
+      const minutes = Number(row.MINUTES ?? 0)
+      addEntry(staffId, moduleId, minutes * 60)
+    })
+
+    return map
   }
 
   private normalizeModuleName(name?: string | null): string {

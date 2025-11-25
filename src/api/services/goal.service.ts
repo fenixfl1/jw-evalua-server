@@ -125,7 +125,11 @@ export class GoalService extends BaseService {
 
   private getIsoWeekId(date: Date): number {
     const utcDate = new Date(
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+      Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate()
+      )
     )
     const day = utcDate.getUTCDay() || 7
     utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day)
@@ -163,7 +167,8 @@ export class GoalService extends BaseService {
     goalModuleId: number,
     targets: GoalDailyTargetPayload[],
     session: SessionInfo,
-    manager?: EntityManager
+    manager?: EntityManager,
+    expectedPeriod?: number
   ): Promise<void> {
     try {
       if (!targets.length) return
@@ -191,6 +196,19 @@ export class GoalService extends BaseService {
       const periods = Array.from(
         new Set(dateEntries.map((item) => item.period))
       )
+      const hasInvalidPeriod =
+        expectedPeriod !== undefined &&
+        periods.some((period) => period !== expectedPeriod)
+      if (hasInvalidPeriod) {
+        throw new BadRequestError(
+          'Las fechas del objetivo diario deben pertenecer a la misma semana seleccionada.'
+        )
+      }
+      if (periods.length > 1) {
+        throw new BadRequestError(
+          'Todas las fechas del objetivo diario deben pertenecer a la misma semana.'
+        )
+      }
       const now = new Date()
 
       const repository = manager
@@ -364,7 +382,8 @@ export class GoalService extends BaseService {
           record.GOAL_MODULE_ID,
           payload.DAILY_TARGETS,
           session,
-          manager
+          manager,
+          PERIOD
         )
       }
 
