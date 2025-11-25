@@ -5,6 +5,8 @@ import { ProcessAudit } from '@src/entity/ProcessAudit'
 import { GoalTaskSession } from '@src/entity/GoalTaskSession'
 import { ApiResponse, SessionInfo } from '@src/types/api.types'
 import { BadRequestError } from '@src/errors/http.error'
+import { queryRunner } from '@src/helpers/query-utils'
+import { preparePostgresQuery } from '../middlewares/prepare-postgres-query'
 
 interface RecordEfficiencyPayload {
   MODULE_ID: number
@@ -42,10 +44,8 @@ export class ProductionMetricsService extends BaseService {
 
   constructor() {
     super()
-    this.efficiencyRepository =
-      this.dataSource.getRepository(ModuleEfficiency)
-    this.processAuditRepository =
-      this.dataSource.getRepository(ProcessAudit)
+    this.efficiencyRepository = this.dataSource.getRepository(ModuleEfficiency)
+    this.processAuditRepository = this.dataSource.getRepository(ProcessAudit)
     this.goalTaskSessionRepository =
       this.dataSource.getRepository(GoalTaskSession)
   }
@@ -116,10 +116,7 @@ export class ProductionMetricsService extends BaseService {
   }
 
   @CatchServiceError()
-  async getEfficiency(
-    moduleId: number,
-    period?: number
-  ): Promise<ApiResponse> {
+  async getEfficiency(moduleId: number, period?: number): Promise<ApiResponse> {
     if (!Number.isInteger(moduleId) || moduleId <= 0) {
       throw new BadRequestError('MODULE_ID inválido.')
     }
@@ -164,33 +161,30 @@ export class ProductionMetricsService extends BaseService {
     }
 
     const entries = Array.isArray(payload.ENTRIES)
-      ? payload.ENTRIES
-          .map((entry) => ({
-            operation: entry.operation?.trim() || null,
-            operator: entry.operator?.trim() || null,
-            timeSlot: entry.timeSlot?.trim() || null,
-            samples: this.normalizeOptionalNumber(entry.samples),
-            defects: Array.isArray(entry.defects)
-              ? entry.defects
-                  .filter(
-                    (defect) =>
-                      defect?.type &&
-                      Number.isFinite(Number(defect?.count ?? 0))
-                  )
-                  .map((defect) => ({
-                    type: defect.type.trim(),
-                    count: Number(defect.count ?? 0),
-                  }))
-              : [],
-            comments: entry.comments?.trim() || null,
-          }))
-          .filter(
-            (entry) =>
-              entry.operation ||
-              entry.operator ||
-              entry.defects.length ||
-              entry.samples
-          )
+      ? payload.ENTRIES.map((entry) => ({
+          operation: entry.operation?.trim() || null,
+          operator: entry.operator?.trim() || null,
+          timeSlot: entry.timeSlot?.trim() || null,
+          samples: this.normalizeOptionalNumber(entry.samples),
+          defects: Array.isArray(entry.defects)
+            ? entry.defects
+                .filter(
+                  (defect) =>
+                    defect?.type && Number.isFinite(Number(defect?.count ?? 0))
+                )
+                .map((defect) => ({
+                  type: defect.type.trim(),
+                  count: Number(defect.count ?? 0),
+                }))
+            : [],
+          comments: entry.comments?.trim() || null,
+        })).filter(
+          (entry) =>
+            entry.operation ||
+            entry.operator ||
+            entry.defects.length ||
+            entry.samples
+        )
       : []
 
     if (!entries.length) {
@@ -242,7 +236,10 @@ export class ProductionMetricsService extends BaseService {
       })
     }
 
-    const data = await qb.orderBy('audit."AUDIT_DATE"', 'DESC').limit(50).getMany()
+    const data = await qb
+      .orderBy('audit."AUDIT_DATE"', 'DESC')
+      .limit(50)
+      .getMany()
 
     if (!data.length) {
       return this.noContent()
@@ -312,8 +309,84 @@ export class ProductionMetricsService extends BaseService {
       secondsWorked += seconds
     })
 
+    const manualSeconds = await this.getModuleManualSeconds(moduleId, period)
+    secondsWorked += manualSeconds
+
     const minutesWorked = Number((secondsWorked / 60).toFixed(2))
 
     return { minutesWorked, secondsWorked, activeSessions }
+  }
+
+  private async getModuleManualSeconds(
+    moduleId: number,
+    period?: number
+  ): Promise<number> {
+    const params: Record<string, unknown> = { moduleId }
+    const completionParams: Record<string, unknown> = { moduleId }
+
+    const progressConditions = [
+      `gp."STATE" = 'A'`,
+      `gp."ACTUAL_TIME" IS NOT NULL`,
+      `COALESCE(gp."MODULE_ID", gm."MODULE_ID") = :moduleId`,
+    ]
+    if (Number.isInteger(period)) {
+      progressConditions.push('gp."PERIOD" = :progressPeriod')
+      params.progressPeriod = period
+    }
+
+    const progressSql = `
+      SELECT COALESCE(SUM(COALESCE(gp."ACTUAL_TIME", 0)), 0) AS "HOURS"
+      FROM public."GOAL_PROGRESS" gp
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gp."GOAL_MODULE_ID"
+      WHERE ${progressConditions.join(' AND ')}
+    `
+    const progressQuery = preparePostgresQuery(progressSql, params)
+    const [progressRow] = await queryRunner<{ HOURS: string | number | null }>(
+      progressQuery.query,
+      progressQuery.values
+    )
+    const hoursFromProgress = Number(progressRow?.HOURS ?? 0)
+
+    const completionConditions = [
+      `gtc."STATE" = 'A'`,
+      `gtc."METADATA" IS NOT NULL`,
+      `gtc."METADATA" ? 'timeMinutes'`,
+      `COALESCE(gtc."MODULE_ID", gm."MODULE_ID") = :moduleId`,
+    ]
+    if (Number.isInteger(period)) {
+      completionConditions.push('gtc."PERIOD" = :completionPeriod')
+      completionParams.completionPeriod = period
+    }
+
+    const completionSql = `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN (gtc."METADATA"->>'timeMinutes') ~ '^[-+]?[0-9]+(\\.[0-9]+)?$'
+              THEN (gtc."METADATA"->>'timeMinutes')::numeric
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "MINUTES"
+      FROM public."GOAL_TASK_COMPLETION" gtc
+      LEFT JOIN public."GOAL_TASK" gt
+        ON gt."GOAL_TASK_ID" = gtc."GOAL_TASK_ID"
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gt."GOAL_MODULE_ID"
+      WHERE ${completionConditions.join(' AND ')}
+    `
+    const completionQuery = preparePostgresQuery(
+      completionSql,
+      completionParams
+    )
+    const [completionRow] = await queryRunner<{
+      MINUTES: string | number | null
+    }>(completionQuery.query, completionQuery.values)
+    const minutesFromCompletions = Number(completionRow?.MINUTES ?? 0)
+
+    return hoursFromProgress * 3600 + minutesFromCompletions * 60
   }
 }
