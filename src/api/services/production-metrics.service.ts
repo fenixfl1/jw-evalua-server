@@ -1,8 +1,9 @@
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 import { BaseService, CatchServiceError } from './base.service'
 import { ModuleEfficiency } from '@src/entity/ModuleEfficiency'
 import { ProcessAudit } from '@src/entity/ProcessAudit'
 import { GoalTaskSession } from '@src/entity/GoalTaskSession'
+import { Staff } from '@src/entity/Staff'
 import { ApiResponse, SessionInfo } from '@src/types/api.types'
 import { BadRequestError } from '@src/errors/http.error'
 import { queryRunner } from '@src/helpers/query-utils'
@@ -116,14 +117,22 @@ export class ProductionMetricsService extends BaseService {
   }
 
   @CatchServiceError()
-  async getEfficiency(moduleId: number, period?: number): Promise<ApiResponse> {
-    if (!Number.isInteger(moduleId) || moduleId <= 0) {
+  async getEfficiency(
+    moduleId?: number,
+    period?: number
+  ): Promise<ApiResponse> {
+    if (
+      moduleId !== undefined &&
+      (!Number.isInteger(moduleId) || moduleId <= 0)
+    ) {
       throw new BadRequestError('MODULE_ID inválido.')
     }
 
     const where: Record<string, unknown> = {
-      MODULE_ID: moduleId,
       STATE: 'A',
+    }
+    if (moduleId !== undefined) {
+      where.MODULE_ID = moduleId
     }
     if (Number.isInteger(period)) {
       where.PERIOD = period
@@ -251,7 +260,57 @@ export class ProductionMetricsService extends BaseService {
       return this.noContent()
     }
 
-    return this.success({ data })
+    const staffIds = new Set<number>()
+    const collectStaffId = (value: unknown) => {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        staffIds.add(parsed)
+      }
+    }
+
+    data.forEach((audit) => {
+      collectStaffId(audit.SUPERVISOR)
+      collectStaffId(audit.AUDITOR)
+      if (Array.isArray(audit.ENTRIES)) {
+        audit.ENTRIES.forEach((entry) => collectStaffId(entry?.operator))
+      }
+    })
+
+    let staffNameMap = new Map<number, string>()
+    if (staffIds.size) {
+      const staffRecords = await this.staffRepository.find({
+        where: { STAFF_ID: In(Array.from(staffIds)) },
+      })
+      staffNameMap = new Map(
+        staffRecords.map((staff) => [
+          staff.STAFF_ID,
+          `${staff.NAME ?? ''} ${staff.LAST_NAME ?? ''}`.trim() ||
+            `Colaborador ${staff.STAFF_ID}`,
+        ])
+      )
+    }
+
+    const resolveStaffName = (value: unknown): string | null => {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return value === null || value === undefined ? null : String(value)
+      }
+      return staffNameMap.get(parsed) ?? String(parsed)
+    }
+
+    const enrichedData = data.map((audit) => ({
+      ...audit,
+      SUPERVISOR: resolveStaffName(audit.SUPERVISOR),
+      AUDITOR: resolveStaffName(audit.AUDITOR),
+      ENTRIES: Array.isArray(audit.ENTRIES)
+        ? audit.ENTRIES.map((entry) => ({
+            ...entry,
+            operator: resolveStaffName(entry?.operator),
+          }))
+        : audit.ENTRIES,
+    }))
+
+    return this.success({ data: enrichedData })
   }
 
   @CatchServiceError()

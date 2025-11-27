@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { validateSchema } from '../middlewares/validator-middleware'
 import {
   PATH_GET_MODULE_EFFICIENCY,
+  PATH_GET_MODULE_EFFICIENCY_COLLECTION,
   PATH_GET_MODULE_WORKED_MINUTES,
   PATH_GET_PROCESS_AUDIT,
   PATH_POST_MODULE_EFFICIENCY,
@@ -25,6 +26,11 @@ productionRouter.post(
   PATH_POST_MODULE_EFFICIENCY,
   validateSchema(moduleEfficiencySchema),
   postModuleEfficiencyController
+)
+
+productionRouter.get(
+  PATH_GET_MODULE_EFFICIENCY_COLLECTION,
+  getModuleEfficiencyController
 )
 
 productionRouter.get(

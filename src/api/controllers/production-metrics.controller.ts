@@ -26,7 +26,21 @@ export const getModuleEfficiencyController = async (
   next: NextFunction
 ) => {
   try {
-    const moduleId = Number(req.params.moduleId)
+    const moduleIdFromParams =
+      typeof req.params.moduleId === 'string' &&
+      req.params.moduleId.trim() !== ''
+        ? Number(req.params.moduleId)
+        : undefined
+    const moduleIdFromQuery =
+      typeof req.query.moduleId === 'string' &&
+      req.query.moduleId.trim() !== ''
+        ? Number(req.query.moduleId)
+        : undefined
+    const moduleId = Number.isFinite(moduleIdFromParams)
+      ? moduleIdFromParams
+      : Number.isFinite(moduleIdFromQuery)
+      ? moduleIdFromQuery
+      : undefined
     const period =
       typeof req.query.period === 'string' ? Number(req.query.period) : undefined
     const result = await productionMetricsService.getEfficiency(
