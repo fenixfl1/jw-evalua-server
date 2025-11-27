@@ -82,7 +82,11 @@ export const getProcessAuditController = async (
   next: NextFunction
 ) => {
   try {
-    const moduleId = Number(req.query.moduleId)
+    const moduleIdParam = req.query.moduleId
+    const moduleId =
+      typeof moduleIdParam === 'string' && moduleIdParam.trim() !== ''
+        ? Number(moduleIdParam)
+        : undefined
     const { startDate, endDate } = req.query as {
       startDate?: string
       endDate?: string

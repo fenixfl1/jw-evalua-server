@@ -231,6 +231,7 @@ export class UserService extends BaseService {
         S."PHONE",
         S."STAFF_ID",
         S."ADDRESS",
+        S."MODULE_ID",
         STRING_AGG(RXU."ROLE_ID"::TEXT, ', ') "ROLE_ID",
         STRING_AGG(R."NAME", ', ') "ROLES",
         S."NAME" || ' ' || S."LAST_NAME" || ' ' || U."USERNAME"  || ' ' || S."PHONE" AS "FILTER"

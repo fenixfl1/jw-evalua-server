@@ -163,7 +163,7 @@ export class ProductionMetricsService extends BaseService {
     const entries = Array.isArray(payload.ENTRIES)
       ? payload.ENTRIES.map((entry) => ({
           operation: entry.operation?.trim() || null,
-          operator: entry.operator?.trim() || null,
+          operator: entry.operator || null,
           timeSlot: entry.timeSlot?.trim() || null,
           samples: this.normalizeOptionalNumber(entry.samples),
           defects: Array.isArray(entry.defects)
@@ -196,8 +196,8 @@ export class ProductionMetricsService extends BaseService {
       AUDIT_DATE: auditDate,
       SHIFT: payload.SHIFT?.trim() || null,
       STYLE: payload.STYLE?.trim() || null,
-      SUPERVISOR: payload.SUPERVISOR?.trim() || null,
-      AUDITOR: payload.AUDITOR?.trim() || null,
+      SUPERVISOR: payload.SUPERVISOR || null,
+      AUDITOR: payload.AUDITOR || null,
       ENTRIES: entries,
       COMMENTS: payload.COMMENTS?.trim() || null,
       CREATED_BY: session.userId,
@@ -213,17 +213,23 @@ export class ProductionMetricsService extends BaseService {
 
   @CatchServiceError()
   async getProcessAudits(
-    moduleId: number,
+    moduleId: number | undefined,
     filters: { startDate?: string; endDate?: string }
   ): Promise<ApiResponse> {
-    if (!Number.isInteger(moduleId) || moduleId <= 0) {
+    if (
+      moduleId !== undefined &&
+      (!Number.isInteger(moduleId) || moduleId <= 0)
+    ) {
       throw new BadRequestError('MODULE_ID inválido.')
     }
 
     const qb = this.processAuditRepository
       .createQueryBuilder('audit')
-      .where('audit."MODULE_ID" = :moduleId', { moduleId })
-      .andWhere('audit."STATE" = :state', { state: 'A' })
+      .where('audit."STATE" = :state', { state: 'A' })
+
+    if (moduleId !== undefined) {
+      qb.andWhere('audit."MODULE_ID" = :moduleId', { moduleId })
+    }
 
     if (filters.startDate) {
       qb.andWhere('audit."AUDIT_DATE" >= :startDate', {

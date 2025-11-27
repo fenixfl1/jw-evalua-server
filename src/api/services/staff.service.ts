@@ -118,6 +118,7 @@ export class StaffService extends BaseService {
             U."USER_ID",
             U."USERNAME",
             U."IS_ACTIVE",
+            S."MODULE_ID",
             M."DESCRIPTION" "DESC_MODULE",
             M."STATE" "MODULE_STATE",
             rxs."ROLE_ID",
