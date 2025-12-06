@@ -12,7 +12,7 @@ import {
   updateEvaluationSchema,
   evaluationAvailabilityQuerySchema,
 } from '@src/validators/evaluation.schema'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 import {
   createEvaluationController,
   updateEvaluationController,

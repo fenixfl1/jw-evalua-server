@@ -18,14 +18,14 @@ export const createProcessAuditSchema = Joi.object({
   MODULE_ID: Joi.number().integer().positive().required(),
   AUDIT_DATE: Joi.string().required(),
   SHIFT: Joi.string().max(50).allow('', null),
-  STYLE: Joi.string().max(120),
+  STYLE: Joi.number(),
   SUPERVISOR: Joi.number().required(),
   AUDITOR: Joi.number().required(),
   COMMENTS: Joi.string().max(255).allow('', null),
   ENTRIES: Joi.array()
     .items(
       Joi.object({
-        operation: Joi.string().max(120).allow('', null),
+        operation: Joi.number(),
         operator: Joi.number(),
         timeSlot: Joi.string().max(60).allow('', null),
         samples: Joi.number().integer().min(0).allow(null),

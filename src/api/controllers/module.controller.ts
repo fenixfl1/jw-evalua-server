@@ -80,3 +80,31 @@ export const getModuleMembersController = async (
     next(error)
   }
 }
+
+export const getModuleGoalsController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await moduleService.getModuleGoals(req.body)
+
+    sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getMemberTasksController = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await moduleService.getMemberTasks(req.body)
+
+    sendResponse(res, result)
+  } catch (error) {
+    next(error)
+  }
+}

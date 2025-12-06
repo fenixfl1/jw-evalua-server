@@ -56,7 +56,15 @@ interface GoalTaskPayloadInput {
   DESCRIPTION: string
   COMMENT?: string | null
   TARGET: number
+  UNITS_PER_ITEM?: number
   STAFF: GoalTaskStaffPayload[]
+}
+
+interface GoalTaskTemplatePayload {
+  DESCRIPTION?: string
+  COMMENT?: string | null
+  TARGET?: number
+  UNITS_PER_ITEM?: number
 }
 
 type SanitizedGoalTaskPayload = {
@@ -65,6 +73,13 @@ type SanitizedGoalTaskPayload = {
   TARGET: number
   UNITS_PER_ITEM: number
   STAFF: GoalTaskStaffPayload[]
+}
+
+type SanitizedGoalTaskTemplate = {
+  DESCRIPTION: string
+  COMMENT: string | null
+  TARGET: number
+  UNITS_PER_ITEM: number
 }
 
 type StaffTaskNotification = {
@@ -125,11 +140,7 @@ export class GoalService extends BaseService {
 
   private getIsoWeekId(date: Date): number {
     const utcDate = new Date(
-      Date.UTC(
-        date.getUTCFullYear(),
-        date.getUTCMonth(),
-        date.getUTCDate()
-      )
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
     )
     const day = utcDate.getUTCDay() || 7
     utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day)
@@ -252,8 +263,14 @@ export class GoalService extends BaseService {
     payload: CreateGoalPayload,
     session: SessionInfo
   ): Promise<ApiResponse> {
+    const { TASK_TEMPLATES, ...restPayload } = payload as CreateGoalPayload & {
+      TASK_TEMPLATES?: GoalTaskTemplatePayload[]
+    }
+    const sanitizedTemplates = this.sanitizeTaskTemplates(TASK_TEMPLATES)
+
     const goal = this.goalRepository.create({
-      ...payload,
+      ...restPayload,
+      TASK_TEMPLATES: sanitizedTemplates as never,
       CREATED_AT: new Date(),
       CREATED_BY: session.userId,
       STATE: 'A',
@@ -338,8 +355,7 @@ export class GoalService extends BaseService {
       activeMembers.map((staff) => [staff.STAFF_ID, staff])
     )
     const sanitizedTasks = this.sanitizeTaskPayloads(TASKS, memberMap)
-    const staffTaskAssignments =
-      this.buildStaffTaskAssignments(sanitizedTasks)
+    const staffTaskAssignments = this.buildStaffTaskAssignments(sanitizedTasks)
 
     const staffTotals = this.aggregateTargetsByStaff(sanitizedTasks)
     if (!staffTotals.size) {
@@ -562,7 +578,9 @@ export class GoalService extends BaseService {
           ? tasksForTemplate
               .map(
                 (task) =>
-                  `${task.description} (${task.targetFormatted ?? task.target} unidades)`
+                  `${task.description} (${
+                    task.targetFormatted ?? task.target
+                  } unidades)`
               )
               .join('; ')
           : ''
@@ -698,6 +716,66 @@ export class GoalService extends BaseService {
         STAFF: sanitizedStaff,
       }
     })
+  }
+
+  private sanitizeTaskTemplates(
+    templates?: GoalTaskTemplatePayload[] | null
+  ): SanitizedGoalTaskTemplate[] {
+    if (!Array.isArray(templates)) {
+      return []
+    }
+
+    const sanitized: SanitizedGoalTaskTemplate[] = []
+
+    templates.forEach((template, index) => {
+      const description = String(template?.DESCRIPTION ?? '').trim()
+      const comment =
+        typeof template?.COMMENT === 'string'
+          ? template.COMMENT.trim().slice(0, 500) || null
+          : null
+      const target = Number(template?.TARGET ?? 0)
+      const unitsPerItemRaw = Number(template?.UNITS_PER_ITEM ?? 1)
+      const hasContent =
+        description.length ||
+        comment !== null ||
+        Number.isFinite(target) ||
+        Number.isFinite(unitsPerItemRaw)
+
+      if (!hasContent) {
+        return
+      }
+
+      if (!description) {
+        throw new BadRequestError(
+          `La descripción de la tarea #${index + 1} es obligatoria.`
+        )
+      }
+      if (description.length > 100) {
+        throw new BadRequestError(
+          `La descripción de la tarea "${description}" excede el límite permitido.`
+        )
+      }
+
+      if (!Number.isInteger(target) || target <= 0) {
+        throw new BadRequestError(
+          `El objetivo de la tarea "${description}" debe ser un número entero mayor a cero.`
+        )
+      }
+
+      const unitsPerItem =
+        Number.isFinite(unitsPerItemRaw) && unitsPerItemRaw > 0
+          ? Number(unitsPerItemRaw)
+          : 1
+
+      sanitized.push({
+        DESCRIPTION: description,
+        COMMENT: comment,
+        TARGET: target,
+        UNITS_PER_ITEM: unitsPerItem,
+      })
+    })
+
+    return sanitized
   }
 
   private aggregateTargetsByStaff(
@@ -956,7 +1034,10 @@ export class GoalService extends BaseService {
 
   @CatchServiceError()
   async update(payload: Goal, session: SessionInfo) {
-    const { GOAL_ID, ...restProps } = payload
+    const { GOAL_ID, TASK_TEMPLATES, ...restProps } = payload as Goal & {
+      TASK_TEMPLATES?: GoalTaskTemplatePayload[]
+    }
+    const sanitizedTemplates = this.sanitizeTaskTemplates(TASK_TEMPLATES)
 
     const [goal] = await this.goalRepository.find({ where: { GOAL_ID } })
     if (!goal) {
@@ -965,7 +1046,12 @@ export class GoalService extends BaseService {
 
     this.goalRepository.update(
       { GOAL_ID },
-      { ...restProps, UPDATED_AT: new Date(), UPDATED_BY: session.userId }
+      {
+        ...restProps,
+        TASK_TEMPLATES: sanitizedTemplates as never,
+        UPDATED_AT: new Date(),
+        UPDATED_BY: session.userId,
+      }
     )
 
     return this.success({ message: 'Meta actualizada con éxito.' })
@@ -1597,7 +1683,11 @@ export class GoalService extends BaseService {
     period: number,
     goalId: number
   ): Promise<ApiResponse> {
-    if (!Number.isInteger(moduleId) || !Number.isInteger(period) || !Number.isInteger(goalId)) {
+    if (
+      !Number.isInteger(moduleId) ||
+      !Number.isInteger(period) ||
+      !Number.isInteger(goalId)
+    ) {
       throw new BadRequestError('Parámetros inválidos.')
     }
 
@@ -1685,27 +1775,57 @@ export class GoalService extends BaseService {
     pagination: Pagination
   ): Promise<ApiResponse> {
     const { whereClause, values } = whereClauseBuilder(payload)
+    const hasAssignmentFilters = (payload ?? []).some(
+      (condition) =>
+        typeof condition.field === 'string' &&
+        ['MODULE_ID', 'PERIOD'].includes(
+          (condition.field as string).toUpperCase()
+        )
+    )
 
-    const statement = `
+    const baseSubquery = `
+      SELECT 
+        g."GOAL_ID",
+        g."DESCRIPTION",
+        g."START_DATE",
+        g."END_DATE",
+        g."STATE",
+        g."WEIGHT",
+        g."TARGET_VALUE",
+        g."CREATED_AT",
+        g."TASK_TEMPLATES",
+        gm."MODULE_ID",
+        gm."PERIOD",
+        g."GOAL_ID" || ' ' || g."DESCRIPTION" || ' ' || g."SCOPE" || ' ' ||
+          COALESCE(gm."MODULE_ID"::text, '') || ' ' ||
+          COALESCE(gm."PERIOD"::text, '') AS "FILTER"
+      FROM 
+        public."GOAL" g
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_ID" = g."GOAL_ID"
+       AND gm."STATE" = 'A'
+    `
+
+    const statement = hasAssignmentFilters
+      ? `
       SELECT
         *
       FROM 
         (
-          SELECT 
-            g."GOAL_ID",
-            g."DESCRIPTION",
-            g."START_DATE",
-            g."END_DATE",
-            g."STATE",
-            g."WEIGHT",
-            g."TARGET_VALUE",
-            g."CREATED_AT",
-            g."GOAL_ID" || ' ' || g."DESCRIPTION" || ' ' || g."SCOPE" AS "FILTER"
-          FROM 
-            public."GOAL" g
+          ${baseSubquery}
         ) AS subquery
       ${whereClause}
-      ORDER BY "GOAL_ID"
+      ORDER BY "GOAL_ID", "MODULE_ID", "PERIOD"
+    `
+      : `
+      SELECT
+        DISTINCT ON ("GOAL_ID") subquery.*
+      FROM 
+        (
+          ${baseSubquery}
+        ) AS subquery
+      ${whereClause}
+      ORDER BY "GOAL_ID", "MODULE_ID", "PERIOD"
     `
 
     const [data = [], metadata] = await paginatedQuery({

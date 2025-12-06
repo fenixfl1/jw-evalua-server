@@ -1,4 +1,5 @@
-import Joi from 'joi'
+import { SimpleCondition } from '@src/types/api.types'
+import Joi, { ObjectSchema } from 'joi'
 
 export const advancedConditionSchema = Joi.array().items(
   Joi.object({
@@ -17,3 +18,14 @@ export const advancedConditionSchema = Joi.array().items(
       .required(),
   })
 )
+
+export const simpleConditionSchema: ObjectSchema<SimpleCondition<any>> =
+  Joi.object({
+    condition: Joi.object().unknown(true).required(),
+
+    select: Joi.array().items(Joi.string()).optional(),
+
+    orden: Joi.object()
+      .pattern(Joi.string(), Joi.string().valid('ASC', 'DESC'))
+      .optional(),
+  })

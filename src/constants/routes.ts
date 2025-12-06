@@ -21,6 +21,8 @@ export const PATH_CREATE_UPDATE_MODULE = '/module'
 export const PATH_GET_PAGINATED_MODULES = '/module/pagination'
 export const PATH_CREATE_OR_UPDATE_MODULE_MEMBERS = '/module/members'
 export const PATH_GET_MODULE_MEMBERS = '/module/get_members'
+export const PATH_GET_MODULE_GOAL = '/module/goals'
+export const PATH_GET_MEMBERS_TASK = '/module/member/tasks'
 // Goals
 export const PATH_CREATE_GOAL = '/goal'
 export const PATH_GET_GOAL_PAGINATION = '/goal/pagination'
@@ -36,8 +38,7 @@ export const PATH_GET_GOAL_SUMMARY_MODULE_PAGINATION =
 export const PATH_GET_GOALS_BY_MODULE = '/goal/module/:moduleId/:period'
 export const PATH_GET_GOAL_MODULE_TASKS = '/goal/module/:moduleId/tasks'
 export const PATH_POST_MODULE_EFFICIENCY = '/module/efficiency'
-export const PATH_GET_MODULE_EFFICIENCY_COLLECTION =
-  PATH_POST_MODULE_EFFICIENCY
+export const PATH_GET_MODULE_EFFICIENCY_COLLECTION = PATH_POST_MODULE_EFFICIENCY
 export const PATH_GET_MODULE_EFFICIENCY = '/module/:moduleId/efficiency'
 export const PATH_GET_MODULE_WORKED_MINUTES =
   '/module/:moduleId/efficiency/worked-minutes'

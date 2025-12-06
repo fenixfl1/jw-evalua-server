@@ -14,6 +14,15 @@ import { paginatedQuery, queryRunner } from '@src/helpers/query-utils'
 import { StaffModule } from '@src/entity/StaffXModule'
 import { Staff } from '@src/entity/Staff'
 import { publishEmailToQueue } from './email/email-producer.service'
+import { simpleWhereBuilder } from '@src/helpers/simple-where-builder'
+import { Goal } from '@src/entity/Goal'
+
+type GetMemberTaskPayload = SimpleCondition<{
+  MODULE_ID: number
+  PERIOD: number
+  MEMBER_ID: number
+  GOAL_ID?: number
+}>
 
 interface CreateModulePayload {
   DESCRIPTION: string
@@ -324,6 +333,158 @@ export class ModuleService extends BaseService {
     `
 
     const data = await queryRunner<Staff>(statement, [MODULE_ID, STATE])
+
+    if (!data.length) {
+      return this.noContent()
+    }
+
+    return this.success({ data })
+  }
+
+  @CatchServiceError()
+  async getModuleGoals(payload: SimpleCondition) {
+    const { where, values } = simpleWhereBuilder(payload)
+
+    const statement = `
+      SELECT
+        *
+      FROM 
+        (
+          SELECT 
+            g."GOAL_ID",
+            g."DESCRIPTION",
+            g."START_DATE",
+            g."END_DATE",
+            g."STATE",
+            g."WEIGHT",
+            g."TARGET_VALUE",
+            g."CREATED_AT",
+            g."TASK_TEMPLATES",
+            m."MODULE_ID",
+            g."DESCRIPTION" "MODULE_NAME",
+            gxm."PERIOD",
+            g."GOAL_ID" || ' ' || g."DESCRIPTION" || ' ' || g."SCOPE" AS "FILTER"
+          FROM 
+            public."GOAL" g
+            LEFT JOIN public."GOAL_X_MODULE" gxm ON gxm."GOAL_ID" = g."GOAL_ID"
+            LEFT JOIN public."MODULE" m ON m."MODULE_ID" = gxm."MODULE_ID"
+        ) AS subquery
+      ${where}
+      ORDER BY "GOAL_ID"
+    `
+
+    const data = await queryRunner<Goal>(statement, values)
+
+    if (!data.length) {
+      return this.noContent()
+    }
+
+    return this.success({ data })
+  }
+
+  @CatchServiceError()
+  async getMemberTasks(payload: GetMemberTaskPayload) {
+    const { where, values } = simpleWhereBuilder(payload)
+
+    const statement = `
+      WITH TASK_COMPLETIONS AS (
+        SELECT
+          gtc."GOAL_TASK_ID",
+          gtc."STAFF_ID",
+          gtc."MODULE_ID",
+          gtc."PERIOD",
+          SUM(gtc."UNITS") AS "COMPLETED_UNITS"
+        FROM public."GOAL_TASK_COMPLETION" gtc
+        WHERE gtc."STATE" = 'A'
+        GROUP BY
+          gtc."GOAL_TASK_ID",
+          gtc."STAFF_ID",
+          gtc."MODULE_ID",
+          gtc."PERIOD"
+      )
+      SELECT
+        *
+      FROM (
+        SELECT DISTINCT
+          gm."MODULE_ID",
+          gm."PERIOD",
+          gts."STAFF_ID" AS "MEMBER_ID",
+          gm."GOAL_MODULE_ID",
+          g."GOAL_ID",
+          g."DESCRIPTION" AS "GOAL_DESCRIPTION",
+          gt."GOAL_TASK_ID",
+          gt."DESCRIPTION" AS "TASK_DESCRIPTION",
+          gt."COMMENT" AS "TASK_COMMENT",
+          gt."TARGET" AS "TASK_TARGET",
+          gts."TARGET" AS "ASSIGNED_TARGET",
+          COALESCE(gt."UNITS_PER_ITEM", 1) AS "UNITS_PER_ITEM",
+          COALESCE(tc."COMPLETED_UNITS", 0) AS "COMPLETED_UNITS",
+          CASE
+            WHEN COALESCE(gts."TARGET", 0) = 0 THEN NULL
+            ELSE ROUND(
+              LEAST(
+                COALESCE(tc."COMPLETED_UNITS", 0)
+                / NULLIF(gts."TARGET", 0)
+                * 100,
+                100
+              ),
+              2
+            )
+          END AS "COMPLETION_PERCENTAGE",
+          COALESCE(
+            ROUND(
+              COALESCE(tc."COMPLETED_UNITS", 0)
+              / NULLIF(COALESCE(gt."UNITS_PER_ITEM", 1), 0),
+              2
+            ),
+            0
+          ) AS "COMPLETED_ITEMS",
+          btrim(
+            COALESCE(s."NAME", '') || ' ' || COALESCE(s."LAST_NAME", '')
+          ) AS "MEMBER_NAME",
+          m."DESCRIPTION" AS "MODULE_NAME",
+          g."DESCRIPTION" || ' ' || gt."DESCRIPTION" || ' ' ||
+            COALESCE(m."DESCRIPTION", '') || ' ' ||
+            btrim(COALESCE(s."NAME", '') || ' ' || COALESCE(s."LAST_NAME", ''))
+            AS "FILTER"
+        FROM public."GOAL_TASK_X_STAFF" gts
+        INNER JOIN public."GOAL_TASK" gt
+          ON gt."GOAL_TASK_ID" = gts."GOAL_TASK_ID"
+        INNER JOIN public."GOAL_X_MODULE" gm
+          ON gm."GOAL_MODULE_ID" = gt."GOAL_MODULE_ID"
+        INNER JOIN public."GOAL" g
+          ON g."GOAL_ID" = gm."GOAL_ID"
+        INNER JOIN public."MODULE" m
+          ON m."MODULE_ID" = gm."MODULE_ID"
+        INNER JOIN public."STAFF" s
+          ON s."STAFF_ID" = gts."STAFF_ID"
+        LEFT JOIN TASK_COMPLETIONS tc
+          ON tc."GOAL_TASK_ID" = gts."GOAL_TASK_ID"
+         AND tc."STAFF_ID" = gts."STAFF_ID"
+         AND tc."MODULE_ID" = gm."MODULE_ID"
+         AND COALESCE(tc."PERIOD", -1) = COALESCE(gm."PERIOD", -1)
+        WHERE gts."STATE" = 'A'
+          AND gt."STATE" = 'A'
+          AND gm."STATE" = 'A'
+          AND g."STATE" = 'A'
+          AND m."STATE" = 'A'
+          AND s."STATE" = 'A'
+          AND EXISTS (
+            SELECT 1
+            FROM public."STAFF_X_MODULE" sm
+            WHERE sm."STAFF_ID" = gts."STAFF_ID"
+              AND sm."MODULE_ID" = gm."MODULE_ID"
+              AND sm."STATE" = 'A'
+          )
+      ) AS subquery
+      ${where}
+      ORDER BY
+        "GOAL_ID",
+        "GOAL_TASK_ID",
+        "MEMBER_ID"
+    `
+
+    const data = await queryRunner(statement, values)
 
     if (!data.length) {
       return this.noContent()

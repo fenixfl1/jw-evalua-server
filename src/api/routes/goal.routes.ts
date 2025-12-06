@@ -19,7 +19,7 @@ import {
   postProgressSchema,
   updateGoalSchema,
 } from '@src/validators/goal.schema'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 import {
   assignGoalModuleController,
   assignGoalStaffController,

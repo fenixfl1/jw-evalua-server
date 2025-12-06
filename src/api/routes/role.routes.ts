@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { validateSchema } from '../middlewares/validator-middleware'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 import {
   createRoleController,
   getOneRoleController,

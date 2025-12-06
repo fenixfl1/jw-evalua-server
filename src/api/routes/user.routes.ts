@@ -18,7 +18,7 @@ import {
   PATH_GET_USER_PAGINAtION,
   PATH_USER,
 } from '@src/constants/routes'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 const userRouter = Router()
 
 userRouter.post(

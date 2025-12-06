@@ -13,6 +13,13 @@ const numericTransformer = {
   },
 }
 
+export interface GoalTaskTemplate {
+  DESCRIPTION: string
+  COMMENT: string | null
+  TARGET: number
+  UNITS_PER_ITEM: number
+}
+
 @Entity('GOAL')
 export class Goal extends BaseEntity {
   @PrimaryGeneratedColumn()
@@ -40,6 +47,13 @@ export class Goal extends BaseEntity {
 
   @Column({ name: 'SCOPE', type: 'enum', enum: GoalScope })
   SCOPE: GoalScope
+
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'[]'::jsonb",
+  })
+  TASK_TEMPLATES: GoalTaskTemplate[]
 
   @OneToMany(() => GoalStaff, (goalStaff) => goalStaff.GOAL)
   STAFF: GoalStaff[]

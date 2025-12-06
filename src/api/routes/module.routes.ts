@@ -1,6 +1,8 @@
 import {
   PATH_CREATE_OR_UPDATE_MODULE_MEMBERS,
   PATH_CREATE_UPDATE_MODULE,
+  PATH_GET_MEMBERS_TASK,
+  PATH_GET_MODULE_GOAL,
   PATH_GET_MODULE_MEMBERS,
   PATH_GET_PAGINATED_MODULES,
 } from '@src/constants/routes'
@@ -9,6 +11,8 @@ import { validateSchema } from '../middlewares/validator-middleware'
 import {
   createModuleController,
   createOrUpdateMembersController,
+  getMemberTasksController,
+  getModuleGoalsController,
   getModuleMembersController,
   getPaginatedModulesController,
   updateModuleController,
@@ -19,7 +23,10 @@ import {
   getModuleMembersSchema,
   updateModuleSchema,
 } from '@src/validators/module.schema'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import {
+  advancedConditionSchema,
+  simpleConditionSchema,
+} from '@src/validators/condition.schema'
 
 const moduleRouter = Router()
 
@@ -47,6 +54,18 @@ moduleRouter.post(
   PATH_GET_MODULE_MEMBERS,
   validateSchema(getModuleMembersSchema),
   getModuleMembersController
+)
+
+moduleRouter.post(
+  PATH_GET_MODULE_GOAL,
+  validateSchema(simpleConditionSchema),
+  getModuleGoalsController
+)
+
+moduleRouter.post(
+  PATH_GET_MEMBERS_TASK,
+  validateSchema(simpleConditionSchema),
+  getMemberTasksController
 )
 
 export default moduleRouter

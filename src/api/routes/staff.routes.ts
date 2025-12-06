@@ -17,7 +17,7 @@ import {
   updateStaffController,
   validateIdentityDocumentController,
 } from '../controllers/staff.controller'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 
 const staffRouter = Router()
 

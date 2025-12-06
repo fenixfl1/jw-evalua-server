@@ -11,12 +11,18 @@ const taskStaffSchema = Joi.object({
   TARGET: Joi.number().integer().min(1).required(),
 })
 
-const goalTaskSchema = Joi.object({
+const goalTaskBaseSchema = Joi.object({
   DESCRIPTION: Joi.string().max(100).required(),
   COMMENT: Joi.string().max(500).allow('', null).optional(),
   TARGET: Joi.number().integer().min(1).required(),
+  UNITS_PER_ITEM: Joi.number().positive().required(),
+})
+
+const goalTaskSchema = goalTaskBaseSchema.keys({
   STAFF: Joi.array().items(taskStaffSchema).min(1).required(),
 })
+
+const goalTaskTemplateSchema = goalTaskBaseSchema
 
 export const createGoalSchema = Joi.object({
   MODULE_ID: Joi.number().integer().optional(),
@@ -26,6 +32,7 @@ export const createGoalSchema = Joi.object({
   END_DATE: Joi.date().required(),
   WEIGHT: Joi.number().min(0).max(100).required(),
   DAILY_TARGETS: Joi.array().items(dailyTargetSchema).optional(),
+  TASK_TEMPLATES: Joi.array().items(goalTaskTemplateSchema).optional(),
   SCOPE: Joi.string()
     .valid('individual', 'module')
     .default('module')
@@ -42,6 +49,7 @@ export const updateGoalSchema = Joi.object({
   SCOPE: Joi.string().valid('individual', 'module').optional(),
   STATE: Joi.string().valid('A', 'I').optional(),
   TARGET_VALUE: Joi.number().integer().optional(),
+  TASK_TEMPLATES: Joi.array().items(goalTaskTemplateSchema).optional(),
 })
 
 export const assignGoalStaffSchema = Joi.object({

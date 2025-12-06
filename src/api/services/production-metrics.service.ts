@@ -4,6 +4,8 @@ import { ModuleEfficiency } from '@src/entity/ModuleEfficiency'
 import { ProcessAudit } from '@src/entity/ProcessAudit'
 import { GoalTaskSession } from '@src/entity/GoalTaskSession'
 import { Staff } from '@src/entity/Staff'
+import { Goal } from '@src/entity/Goal'
+import { GoalTask } from '@src/entity/GoalTask'
 import { ApiResponse, SessionInfo } from '@src/types/api.types'
 import { BadRequestError } from '@src/errors/http.error'
 import { queryRunner } from '@src/helpers/query-utils'
@@ -42,6 +44,8 @@ export class ProductionMetricsService extends BaseService {
   private efficiencyRepository: Repository<ModuleEfficiency>
   private processAuditRepository: Repository<ProcessAudit>
   private goalTaskSessionRepository: Repository<GoalTaskSession>
+  private goalRepository: Repository<Goal>
+  private goalTaskRepository: Repository<GoalTask>
 
   constructor() {
     super()
@@ -49,6 +53,8 @@ export class ProductionMetricsService extends BaseService {
     this.processAuditRepository = this.dataSource.getRepository(ProcessAudit)
     this.goalTaskSessionRepository =
       this.dataSource.getRepository(GoalTaskSession)
+    this.goalRepository = this.dataSource.getRepository(Goal)
+    this.goalTaskRepository = this.dataSource.getRepository(GoalTask)
   }
 
   private calculateActiveSeconds(start: Date | null, end: Date): number {
@@ -171,7 +177,7 @@ export class ProductionMetricsService extends BaseService {
 
     const entries = Array.isArray(payload.ENTRIES)
       ? payload.ENTRIES.map((entry) => ({
-          operation: entry.operation?.trim() || null,
+          operation: entry.operation || null,
           operator: entry.operator || null,
           timeSlot: entry.timeSlot?.trim() || null,
           samples: this.normalizeOptionalNumber(entry.samples),
@@ -204,7 +210,7 @@ export class ProductionMetricsService extends BaseService {
       MODULE_ID: moduleId,
       AUDIT_DATE: auditDate,
       SHIFT: payload.SHIFT?.trim() || null,
-      STYLE: payload.STYLE?.trim() || null,
+      STYLE: payload.STYLE || null,
       SUPERVISOR: payload.SUPERVISOR || null,
       AUDITOR: payload.AUDITOR || null,
       ENTRIES: entries,
@@ -261,6 +267,8 @@ export class ProductionMetricsService extends BaseService {
     }
 
     const staffIds = new Set<number>()
+    const goalIds = new Set<number>()
+    const goalTaskIds = new Set<number>()
     const collectStaffId = (value: unknown) => {
       const parsed = Number(value)
       if (Number.isFinite(parsed) && parsed > 0) {
@@ -271,8 +279,18 @@ export class ProductionMetricsService extends BaseService {
     data.forEach((audit) => {
       collectStaffId(audit.SUPERVISOR)
       collectStaffId(audit.AUDITOR)
+      const styleId = Number(audit.STYLE)
+      if (Number.isFinite(styleId) && styleId > 0) {
+        goalIds.add(styleId)
+      }
       if (Array.isArray(audit.ENTRIES)) {
-        audit.ENTRIES.forEach((entry) => collectStaffId(entry?.operator))
+        audit.ENTRIES.forEach((entry) => {
+          collectStaffId(entry?.operator)
+          const operationId = Number(entry?.operation)
+          if (Number.isFinite(operationId) && operationId > 0) {
+            goalTaskIds.add(operationId)
+          }
+        })
       }
     })
 
@@ -290,6 +308,28 @@ export class ProductionMetricsService extends BaseService {
       )
     }
 
+    let goalNameMap = new Map<number, string>()
+    if (goalIds.size) {
+      const goals = await this.goalRepository.find({
+        select: ['GOAL_ID', 'DESCRIPTION'],
+        where: { GOAL_ID: In(Array.from(goalIds)) },
+      })
+      goalNameMap = new Map(
+        goals.map((goal) => [goal.GOAL_ID, goal.DESCRIPTION ?? `Estilo ${goal.GOAL_ID}`])
+      )
+    }
+
+    let goalTaskDescriptionMap = new Map<number, string>()
+    if (goalTaskIds.size) {
+      const tasks = await this.goalTaskRepository.find({
+        select: ['GOAL_TASK_ID', 'DESCRIPTION'],
+        where: { GOAL_TASK_ID: In(Array.from(goalTaskIds)) },
+      })
+      goalTaskDescriptionMap = new Map(
+        tasks.map((task) => [task.GOAL_TASK_ID, task.DESCRIPTION ?? `Operación ${task.GOAL_TASK_ID}`])
+      )
+    }
+
     const resolveStaffName = (value: unknown): string | null => {
       const parsed = Number(value)
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -298,14 +338,32 @@ export class ProductionMetricsService extends BaseService {
       return staffNameMap.get(parsed) ?? String(parsed)
     }
 
+    const resolveGoalDescription = (value: unknown): string | null => {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return value === null || value === undefined ? null : String(value)
+      }
+      return goalNameMap.get(parsed) ?? String(parsed)
+    }
+
+    const resolveGoalTaskDescription = (value: unknown): string | null => {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return value === null || value === undefined ? null : String(value)
+      }
+      return goalTaskDescriptionMap.get(parsed) ?? String(parsed)
+    }
+
     const enrichedData = data.map((audit) => ({
       ...audit,
+      STYLE: resolveGoalDescription(audit.STYLE),
       SUPERVISOR: resolveStaffName(audit.SUPERVISOR),
       AUDITOR: resolveStaffName(audit.AUDITOR),
       ENTRIES: Array.isArray(audit.ENTRIES)
         ? audit.ENTRIES.map((entry) => ({
             ...entry,
             operator: resolveStaffName(entry?.operator),
+            operation: resolveGoalTaskDescription(entry?.operation),
           }))
         : audit.ENTRIES,
     }))
@@ -321,9 +379,13 @@ export class ProductionMetricsService extends BaseService {
 
     const { minutesWorked, secondsWorked, activeSessions } =
       await this.calculateModuleWorkedTime(moduleId, period)
+    const totalUnits = await this.calculateModuleCompletedUnits(
+      moduleId,
+      period
+    )
 
     return this.success({
-      data: { minutesWorked, secondsWorked, activeSessions },
+      data: { minutesWorked, secondsWorked, activeSessions, totalUnits },
       message: 'Tiempo trabajado calculado.',
     })
   }
@@ -453,5 +515,69 @@ export class ProductionMetricsService extends BaseService {
     const minutesFromCompletions = Number(completionRow?.MINUTES ?? 0)
 
     return hoursFromProgress * 3600 + minutesFromCompletions * 60
+  }
+
+  private async calculateModuleCompletedUnits(
+    moduleId: number,
+    period?: number
+  ): Promise<number> {
+    const params: Record<string, unknown> = { moduleId }
+    const completionConditions = [
+      `gtc."STATE" = 'A'`,
+      `COALESCE(gtc."MODULE_ID", gm."MODULE_ID") = :moduleId`,
+    ]
+
+    if (Number.isInteger(period)) {
+      completionConditions.push('gtc."PERIOD" = :period')
+      params.period = period
+    }
+
+    const completionSubQuery = `
+      SELECT
+        gtc."GOAL_TASK_ID",
+        SUM(gtc."UNITS") AS "UNITS"
+      FROM public."GOAL_TASK_COMPLETION" gtc
+      LEFT JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gtc."GOAL_MODULE_ID"
+      WHERE ${completionConditions.join(' AND ')}
+      GROUP BY gtc."GOAL_TASK_ID"
+    `
+
+    const goalConditions = [`gm."MODULE_ID" = :moduleId`, `gm."STATE" = 'A'`]
+    if (Number.isInteger(period)) {
+      goalConditions.push('gm."PERIOD" = :period')
+    }
+
+    const sql = `
+      SELECT
+        gt."GOAL_MODULE_ID",
+        MIN(
+          COALESCE(tc."UNITS", 0) /
+          NULLIF(COALESCE(gt."UNITS_PER_ITEM", 1), 0)
+        ) AS "GARMENTS"
+      FROM public."GOAL_TASK" gt
+      INNER JOIN public."GOAL_X_MODULE" gm
+        ON gm."GOAL_MODULE_ID" = gt."GOAL_MODULE_ID"
+      LEFT JOIN (${completionSubQuery}) tc
+        ON tc."GOAL_TASK_ID" = gt."GOAL_TASK_ID"
+      WHERE ${goalConditions.join(' AND ')}
+      GROUP BY gt."GOAL_MODULE_ID"
+    `
+
+    const query = preparePostgresQuery(sql, params)
+    const rows = await queryRunner<{ GARMENTS: string | number | null }>(
+      query.query,
+      query.values
+    )
+
+    const totalUnits = rows.reduce((acc, row) => {
+      const garments = Number(row?.GARMENTS ?? 0)
+      if (Number.isFinite(garments)) {
+        return acc + Math.max(garments, 0)
+      }
+      return acc
+    }, 0)
+
+    return Number(totalUnits.toFixed(2))
   }
 }

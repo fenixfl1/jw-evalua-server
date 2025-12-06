@@ -15,7 +15,7 @@ import {
   PATH_GET_MENU_OPTION_WITH_PERMISSIONS,
   PATH_GET_USER_MENU_OPTIONS,
 } from '@src/constants/routes'
-import { advancedConditionSchema } from '@src/validators/advanced-condition.schema'
+import { advancedConditionSchema } from '@src/validators/condition.schema'
 
 const menuOptionRouter = Router()
 
