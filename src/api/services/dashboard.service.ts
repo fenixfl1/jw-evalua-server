@@ -1597,7 +1597,7 @@ export class DashboardService extends BaseService {
     const params: Record<string, unknown> = {}
 
     if (filters.moduleId !== undefined) {
-      conditions.push('gm."MODULE_ID" = :moduleId')
+      conditions.push('st."MODULE_ID" = :moduleId')
       params.moduleId = filters.moduleId
     }
 
@@ -1634,15 +1634,15 @@ export class DashboardService extends BaseService {
         TRIM(
           COALESCE(st."NAME", '') || ' ' || COALESCE(st."LAST_NAME", '')
         ) AS "STAFF_NAME",
-        gm."MODULE_ID" AS "MODULE_ID",
-        m."DESCRIPTION" AS "MODULE_NAME",
         gs."GOAL_ID" AS "GOAL_ID",
         gs."PERIOD" AS "PERIOD",
         gs."TARGET_VALUE" AS "STAFF_TARGET_VALUE",
         gm."TARGET_VALUE" AS "MODULE_TARGET_VALUE",
         gm."GOAL_MODULE_ID" AS "GOAL_MODULE_ID",
         COALESCE(sc."ACTUAL_VALUE", 0) AS "STAFF_ACTUAL_VALUE",
-        COALESCE(sc."ACTUAL_TIME", 0) AS "STAFF_ACTUAL_TIME"
+        COALESCE(sc."ACTUAL_TIME", 0) AS "STAFF_ACTUAL_TIME",
+        st."MODULE_ID" AS "STAFF_MODULE_ID",
+        sm."DESCRIPTION" AS "STAFF_MODULE_NAME"
       FROM public."GOAL_X_STAFF" gs
       INNER JOIN public."GOAL" g ON g."GOAL_ID" = gs."GOAL_ID"
       INNER JOIN public."GOAL_X_MODULE" gm
@@ -1653,7 +1653,7 @@ export class DashboardService extends BaseService {
        AND sc."STAFF_ID" = gs."STAFF_ID"
        AND sc."PERIOD" IS NOT DISTINCT FROM gs."PERIOD"
       LEFT JOIN public."STAFF" st ON st."STAFF_ID" = gs."STAFF_ID"
-      LEFT JOIN public."MODULE" m ON m."MODULE_ID" = gm."MODULE_ID"
+      LEFT JOIN public."MODULE" sm ON sm."MODULE_ID" = st."MODULE_ID"
       ${whereClause}
     `
 
@@ -1661,8 +1661,6 @@ export class DashboardService extends BaseService {
     const rows = await queryRunner<{
       STAFF_ID: number | null
       STAFF_NAME: string | null
-      MODULE_ID: number | null
-      MODULE_NAME: string | null
       GOAL_ID: number
       PERIOD: number | null
       STAFF_TARGET_VALUE: string | number | null
@@ -1670,6 +1668,8 @@ export class DashboardService extends BaseService {
       GOAL_MODULE_ID: number | null
       STAFF_ACTUAL_VALUE: string | number | null
       STAFF_ACTUAL_TIME: string | number | null
+      STAFF_MODULE_ID: number | null
+      STAFF_MODULE_NAME: string | null
     }>(query.query, query.values)
 
     if (!rows.length) {
@@ -1724,8 +1724,10 @@ export class DashboardService extends BaseService {
         staffMap.set(staffId, entry)
       }
 
-      const moduleName = row.MODULE_NAME ?? 'Sin modulo'
-      entry.modules.add(moduleName)
+      const staffModuleName =
+        row.STAFF_MODULE_NAME ??
+        (row.STAFF_MODULE_ID !== null ? `Módulo ${row.STAFF_MODULE_ID}` : 'Sin modulo')
+      entry.modules.add(staffModuleName)
 
       const staffTargetValue = Number(row.STAFF_TARGET_VALUE ?? 0)
       const staffActualValue = Number(row.STAFF_ACTUAL_VALUE ?? 0)
@@ -1789,41 +1791,6 @@ export class DashboardService extends BaseService {
       const hours = seconds / 3600
       entry.totalActualTime += hours
       entry.timeVarianceSum += hours
-    })
-
-    const staffIds = Array.from(staffMap.keys())
-    const staffRecords = staffIds.length
-      ? await this.staffRepository.find({
-          where: { STAFF_ID: In(staffIds) as never },
-        })
-      : []
-    const staffModuleIds = Array.from(
-      new Set(
-        staffRecords
-          .map((record) => record.MODULE_ID)
-          .filter(
-            (moduleId): moduleId is number =>
-              moduleId !== null && moduleId !== undefined
-          )
-      )
-    )
-    const explicitModules = staffModuleIds.length
-      ? await this.moduleRepository.find({
-          where: { MODULE_ID: In(staffModuleIds) as never },
-        })
-      : []
-    const explicitModuleNameMap = new Map<number, string>(
-      explicitModules.map((module) => [module.MODULE_ID, module.DESCRIPTION])
-    )
-    staffRecords.forEach((record) => {
-      const entry = staffMap.get(record.STAFF_ID)
-      if (!entry) return
-      const moduleId = record.MODULE_ID
-      const moduleName =
-        moduleId !== null && moduleId !== undefined
-          ? explicitModuleNameMap.get(moduleId) ?? 'Sin modulo'
-          : 'Sin modulo'
-      entry.modules.add(moduleName)
     })
 
     const employees = Array.from(staffMap.values())
