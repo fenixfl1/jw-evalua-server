@@ -2458,10 +2458,10 @@ export class DashboardService extends BaseService {
     }>(modulesSql)
 
     const periodsSql = `
-      SELECT DISTINCT e."PERIOD" AS "PERIOD"
-      FROM public."EVALUATION" e
-      WHERE e."STATE" = 'A'
-      ORDER BY e."PERIOD" DESC
+      SELECT DISTINCT gm."PERIOD" AS "PERIOD"
+      FROM public."GOAL_X_MODULE" gm
+      WHERE gm."STATE" = 'A' AND gm."PERIOD" IS NOT NULL
+      ORDER BY gm."PERIOD" DESC
       LIMIT 24
     `
     const periods = await queryRunner<{ PERIOD: number }>(periodsSql)
