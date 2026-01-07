@@ -282,6 +282,7 @@ export class ProductionMetricsService extends BaseService {
     }
 
     const staffIds = new Set<number>()
+    const userIds = new Set<number>()
     const goalIds = new Set<number>()
     const goalTaskIds = new Set<number>()
     const collectStaffId = (value: unknown) => {
@@ -290,10 +291,16 @@ export class ProductionMetricsService extends BaseService {
         staffIds.add(parsed)
       }
     }
+    const collectUserId = (value: unknown) => {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        userIds.add(parsed)
+      }
+    }
 
     data.forEach((audit) => {
-      collectStaffId(audit.SUPERVISOR)
-      collectStaffId(audit.AUDITOR)
+      collectUserId(audit.SUPERVISOR)
+      collectUserId(audit.AUDITOR)
       const styleId = Number(audit.STYLE)
       if (Number.isFinite(styleId) && styleId > 0) {
         goalIds.add(styleId)
@@ -320,6 +327,27 @@ export class ProductionMetricsService extends BaseService {
           `${staff.NAME ?? ''} ${staff.LAST_NAME ?? ''}`.trim() ||
             `Colaborador ${staff.STAFF_ID}`,
         ])
+      )
+    }
+
+    let userNameMap = new Map<number, string>()
+    if (userIds.size) {
+      const users = await this.userRepository.find({
+        where: { USER_ID: In(Array.from(userIds)) },
+        relations: ['STAFF'],
+      })
+      userNameMap = new Map(
+        users.map((user) => {
+          const staff = user.STAFF
+          const staffName = staff
+            ? `${staff.NAME ?? ''} ${staff.LAST_NAME ?? ''}`.trim()
+            : ''
+          const displayName =
+            staffName ||
+            user.USERNAME ||
+            `Usuario ${user.USER_ID}`
+          return [user.USER_ID, displayName]
+        })
       )
     }
 
@@ -353,6 +381,14 @@ export class ProductionMetricsService extends BaseService {
       return staffNameMap.get(parsed) ?? String(parsed)
     }
 
+    const resolveUserName = (value: unknown): string | null => {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return value === null || value === undefined ? null : String(value)
+      }
+      return userNameMap.get(parsed) ?? String(parsed)
+    }
+
     const resolveGoalDescription = (value: unknown): string | null => {
       const parsed = Number(value)
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -372,8 +408,8 @@ export class ProductionMetricsService extends BaseService {
     const enrichedData = data.map((audit) => ({
       ...audit,
       STYLE: resolveGoalDescription(audit.STYLE),
-      SUPERVISOR: resolveStaffName(audit.SUPERVISOR),
-      AUDITOR: resolveStaffName(audit.AUDITOR),
+      SUPERVISOR: resolveUserName(audit.SUPERVISOR),
+      AUDITOR: resolveUserName(audit.AUDITOR),
       ENTRIES: Array.isArray(audit.ENTRIES)
         ? audit.ENTRIES.map((entry) => ({
             ...entry,
