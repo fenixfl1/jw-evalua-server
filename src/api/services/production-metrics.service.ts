@@ -170,10 +170,25 @@ export class ProductionMetricsService extends BaseService {
       throw new BadRequestError('AUDIT_DATE es requerido.')
     }
 
-    const auditDate = new Date(payload.AUDIT_DATE)
-    if (Number.isNaN(auditDate.getTime())) {
+    const auditDateInput = String(payload.AUDIT_DATE).trim()
+    const auditDateMatch =
+      /^(\d{4})-(\d{2})-(\d{2})/.exec(auditDateInput)
+    if (!auditDateMatch) {
       throw new BadRequestError('AUDIT_DATE inválido.')
     }
+    const year = Number(auditDateMatch[1])
+    const month = Number(auditDateMatch[2])
+    const day = Number(auditDateMatch[3])
+    const auditDateCheck = new Date(year, month - 1, day)
+    if (
+      Number.isNaN(auditDateCheck.getTime()) ||
+      auditDateCheck.getFullYear() !== year ||
+      auditDateCheck.getMonth() !== month - 1 ||
+      auditDateCheck.getDate() !== day
+    ) {
+      throw new BadRequestError('AUDIT_DATE inválido.')
+    }
+    const auditDate = `${auditDateMatch[1]}-${auditDateMatch[2]}-${auditDateMatch[3]}`
 
     const entries = Array.isArray(payload.ENTRIES)
       ? payload.ENTRIES.map((entry) => ({
